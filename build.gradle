@@ -80,6 +80,26 @@ test {
     jacoco.includes = ["**akarnokd**"]
 }
 
+
+task testng(type: Test) { 
+     useTestNG()
+     testLogging  {
+        events=["skipped", "failed"]
+        exceptionFormat="full"
+
+        debug.events = ["skipped", "failed"]
+        debug.exceptionFormat="full"
+
+        info.events = ["failed", "skipped"]
+        info.exceptionFormat="full"
+        
+        warn.events = ["failed", "skipped"]
+        warn.exceptionFormat="full"
+     }
+} 
+
+check.dependsOn testng 
+
 jacocoTestReport {
     reports {
         xml.enabled = true
