@@ -22,64 +22,61 @@ import java.util.function.*;
 import org.eclipse.microprofile.reactive.streams.operators.*;
 import org.reactivestreams.*;
 
+import io.reactivex.rxjava3.core.*;
+
+/**
+ * Constructs RxJava-based PublisherBuilders.
+ */
 public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
 
     @Override
     public <T> PublisherBuilder<T> fromPublisher(
             Publisher<? extends T> publisher) {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaPublisherBuilder<>(Flowable.fromPublisher(publisher));
     }
 
     @Override
     public <T> PublisherBuilder<T> of(T t) {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaPublisherBuilder<>(Flowable.just(t));
     }
 
     /* final: Java 8 workaround for safevarargs */
     @Override
     @SafeVarargs
     public final <T> PublisherBuilder<T> of(T... ts) {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaPublisherBuilder<>(Flowable.fromArray(ts));
     }
 
     @Override
     public <T> PublisherBuilder<T> empty() {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaPublisherBuilder<>(Flowable.empty());
     }
 
     @Override
     public <T> PublisherBuilder<T> ofNullable(T t) {
-        // TODO Auto-generated method stub
-        return null;
+        return t != null ? of(t) : empty();
     }
 
     @Override
     public <T> PublisherBuilder<T> fromIterable(Iterable<? extends T> ts) {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaPublisherBuilder<>(Flowable.fromIterable(ts));
     }
 
     @Override
     public <T> PublisherBuilder<T> failed(Throwable t) {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaPublisherBuilder<>(Flowable.error(t));
     }
 
     @Override
     public <T> ProcessorBuilder<T, T> builder() {
-        // TODO Auto-generated method stub
-        return null;
+        DeferredProcessor<T> processor = new DeferredProcessor<>();
+        return new RxJavaProcessorBuilder<>(processor, processor);
     }
 
     @Override
     public <T, R> ProcessorBuilder<T, R> fromProcessor(
             Processor<? super T, ? extends R> processor) {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaProcessorBuilder<>(processor, Flowable.fromPublisher(processor));
     }
 
     @Override
@@ -91,35 +88,49 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
 
     @Override
     public <T> PublisherBuilder<T> iterate(T seed, UnaryOperator<T> f) {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaPublisherBuilder<>(Flowable.generate(() -> seed, (s, e) -> {
+            e.onNext(s);
+            return f.apply(s);
+        }));
     }
 
     @Override
     public <T> PublisherBuilder<T> generate(Supplier<? extends T> s) {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaPublisherBuilder<>(Flowable.generate(e -> e.onNext(s.get())));
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public <T> PublisherBuilder<T> concat(PublisherBuilder<? extends T> a,
             PublisherBuilder<? extends T> b) {
-        // TODO Auto-generated method stub
-        return null;
+        Flowable<T> source1;
+        Flowable<T> source2;
+        if (a instanceof RxJavaPublisherBuilder) {
+            source1 = ((RxJavaPublisherBuilder<T>)a).current;
+        } else {
+            source1 = Flowable.fromPublisher(a.buildRs());
+        }
+        if (b instanceof RxJavaPublisherBuilder) {
+            source2 = ((RxJavaPublisherBuilder<T>)b).current;
+        } else {
+            source2 = Flowable.fromPublisher(b.buildRs());
+        }
+        return new RxJavaPublisherBuilder<>(
+                Flowable.concat(source1, source2));
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public <T> PublisherBuilder<T> fromCompletionStage(
             CompletionStage<? extends T> completionStage) {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaPublisherBuilder<>(Flowable.fromCompletionStage((CompletionStage<T>)completionStage));
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public <T> PublisherBuilder<T> fromCompletionStageNullable(
             CompletionStage<? extends T> completionStage) {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaPublisherBuilder<>(Maybe.fromCompletionStage((CompletionStage<T>)completionStage).toFlowable());
     }
 
     @Override
