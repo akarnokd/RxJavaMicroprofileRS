@@ -22,7 +22,7 @@ import java.util.function.*;
 import java.util.stream.Collector;
 
 import org.eclipse.microprofile.reactive.streams.operators.*;
-import org.eclipse.microprofile.reactive.streams.operators.spi.ReactiveStreamsEngine;
+import org.eclipse.microprofile.reactive.streams.operators.spi.*;
 import org.reactivestreams.*;
 
 import io.reactivex.rxjava3.core.*;
@@ -31,29 +31,52 @@ import io.reactivex.rxjava3.core.*;
  * Builds a Flowable-based sequence by applying operators one after the other.
  * @param <T> the element type of the sequence at a specific stage
  */
-@SuppressWarnings("rawtypes")
 public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T> {
+
+    static volatile boolean BUILD_GRAPH;
 
     Flowable<T> current;
 
+    final RxJavaGraphBuilder graph;
+
+    /**
+     * Globally enable building the Stage graph along with the
+     * Flowable graph.
+     */
+    public static void enableBuildGraph() {
+        BUILD_GRAPH = true;
+    }
+
+    /**
+     * Globally disable building the Stage graph along with the
+     * Flowable graph.
+     */
+    public static void disableBuildGraph() {
+        BUILD_GRAPH = false;
+    }
+    
     /**
      * Create a builder with the given Flowable as the source.
      * @param source the source Flowable to start chaining on
      */
     public RxJavaPublisherBuilder(Flowable<T> source) {
         this.current = source;
+        this.graph = BUILD_GRAPH ? new RxJavaListGraphBuilder() : RxJavaNoopGraphBuilder.INSTANCE;
     }
     
     @Override
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public <R> PublisherBuilder<R> map(
             Function<? super T, ? extends R> mapper) {
         current = (Flowable)current.map(v -> mapper.apply(v));
+        if (graph.isEnabled()) {
+            graph.add((Stage.Map)() -> mapper);
+        }
         return (PublisherBuilder<R>)this;
     }
 
     @Override
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public <S> PublisherBuilder<S> flatMap(
             Function<? super T, ? extends PublisherBuilder<? extends S>> mapper) {
         current = current.concatMap(v -> {
@@ -67,7 +90,7 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T> {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public <S> PublisherBuilder<S> flatMapRsPublisher(
             Function<? super T, ? extends Publisher<? extends S>> mapper) {
         current = (Flowable)current.concatMap(v -> mapper.apply(v), 1);
@@ -75,7 +98,7 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T> {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public <S> PublisherBuilder<S> flatMapCompletionStage(
             Function<? super T, ? extends CompletionStage<? extends S>> mapper) {
         current = (Flowable)current.concatMapSingle(v -> Single.fromCompletionStage((CompletionStage<S>)mapper.apply(v)));
@@ -83,7 +106,7 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T> {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public <S> PublisherBuilder<S> flatMapIterable(
             Function<? super T, ? extends Iterable<? extends S>> mapper) {
         current = (Flowable)current.concatMapIterable(v -> mapper.apply(v));
@@ -153,20 +176,20 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T> {
     @Override
     public CompletionRunner<Void> forEach(Consumer<? super T> action) {
         return new RxJavaCompletionRunner<>(
-                current.doOnNext(v -> action.accept(v)),
-                f -> f.ignoreElements().toCompletionStage(null));
+                current.doOnNext(v -> action.accept(v)).ignoreElements(),
+                c -> c.toCompletionStage(null));
     }
 
     @Override
     public CompletionRunner<Void> ignore() {
-        return new RxJavaCompletionRunner<>(current, 
-                f -> f.ignoreElements().toCompletionStage(null));
+        return new RxJavaCompletionRunner<>(current.ignoreElements(), 
+                c -> c.toCompletionStage(null));
     }
 
     @Override
     public CompletionRunner<Void> cancel() {
-        return new RxJavaCompletionRunner<>(current.take(0L), 
-                f -> f.ignoreElements().toCompletionStage(null));
+        return new RxJavaCompletionRunner<>(current.take(0L).ignoreElements(), 
+                c -> c.toCompletionStage(null));
     }
 
     @Override
@@ -181,16 +204,15 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T> {
     public CompletionRunner<Optional<T>> reduce(BinaryOperator<T> accumulator) {
         return new RxJavaCompletionRunner<>(
                 current.reduce((a, b) -> accumulator.apply(a, b))
-                    .map(Optional::of).defaultIfEmpty(Optional.empty()),
-                s -> s.toCompletionStage());
+                    .map(Optional::of),
+                m -> m.toCompletionStage(Optional.empty()));
     }
 
     @Override
     public CompletionRunner<Optional<T>> findFirst() {
         return new RxJavaCompletionRunner<>(
-                current.firstElement()
-                    .map(Optional::of).defaultIfEmpty(Optional.empty()),
-                s -> s.toCompletionStage());
+                current.firstElement().map(Optional::of),
+                m -> m.toCompletionStage(Optional.empty()));
     }
 
     @SuppressWarnings("unchecked")
@@ -227,7 +249,7 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T> {
         return this;
     }
 
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     @Override
     public PublisherBuilder<T> onErrorResumeWith(
             Function<Throwable, ? extends PublisherBuilder<? extends T>> errorHandler) {
@@ -250,18 +272,25 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T> {
 
     @Override
     public CompletionRunner<Void> to(Subscriber<? super T> subscriber) {
+        if (subscriber instanceof FlowableSubscriber) {
+            new RxJavaCompletionRunnerFlowableSubscriber<>(current, subscriber);
+        }
         return new RxJavaCompletionRunnerSubscriber<>(current, subscriber);
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public <R> CompletionRunner<R> to(
             SubscriberBuilder<? super T, ? extends R> subscriber) {
-        // TODO Auto-generated method stub
-        return null;
+        return new RxJavaCompletionRunner<>(current, f -> {
+            CompletionSubscriber<? super T, ? extends R> cs = subscriber.build();
+            f.subscribe(cs);
+            return (CompletionStage<R>)cs.getCompletion();
+        });
     }
 
     @Override
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public <R> PublisherBuilder<R> via(
             ProcessorBuilder<? super T, ? extends R> processor) {
         Flowable<T> c = current;
@@ -269,7 +298,7 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T> {
         if (processor instanceof RxJavaProcessorBuilder) {
             RxJavaProcessorBuilder<T, R> rx = (RxJavaProcessorBuilder<T, R>)processor;
             c.subscribe(rx.front);
-            current = (Flowable)rx.tail;
+            current = (Flowable)rx.current;
         } else {
             p = processor.buildRs();
             c.subscribe(p);
@@ -279,7 +308,7 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T> {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public <R> PublisherBuilder<R> via(
             Processor<? super T, ? extends R> processor) {
         Flowable<T> c = current;
@@ -295,8 +324,10 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T> {
 
     @Override
     public Publisher<T> buildRs(ReactiveStreamsEngine engine) {
-        // FIXME should we unroll the chain?
-        return current;
+        if (engine instanceof RxJavaEngine) {
+            return current;
+        }
+        return engine.buildPublisher(graph);
     }
 
 }

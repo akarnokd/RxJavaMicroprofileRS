@@ -23,6 +23,7 @@ import org.eclipse.microprofile.reactive.streams.operators.*;
 import org.reactivestreams.*;
 
 import io.reactivex.rxjava3.core.*;
+import io.reactivex.rxjava3.processors.PublishProcessor;
 
 /**
  * Constructs RxJava-based PublisherBuilders.
@@ -79,11 +80,12 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
         return new RxJavaProcessorBuilder<>(processor, Flowable.fromPublisher(processor));
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public <T> SubscriberBuilder<T, Void> fromSubscriber(
             Subscriber<? extends T> subscriber) {
-        // TODO Auto-generated method stub
-        return null;
+        // FIXME the signature is wrong, at least let it compile
+        return new RxJavaSubscriberBuilder<>((Subscriber<T>)subscriber);
     }
 
     @Override
@@ -137,16 +139,33 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
     public <T, R> ProcessorBuilder<T, R> coupled(
             SubscriberBuilder<? super T, ?> subscriber,
             PublisherBuilder<? extends R> publisher) {
-        // TODO Auto-generated method stub
-        return null;
+        return coupled(subscriber.build(), publisher.buildRs());
     }
 
     @Override
     public <T, R> ProcessorBuilder<T, R> coupled(
             Subscriber<? super T> subscriber,
             Publisher<? extends R> publisher) {
-        // TODO Auto-generated method stub
-        return null;
+        
+        BasicProcessor<T> inlet = new BasicProcessor<>();
+        PublishProcessor<Void> publisherActivity = PublishProcessor.create();
+        PublishProcessor<Void> subscriberActivity = PublishProcessor.create();
+        
+        inlet
+                .doOnComplete(() -> subscriberActivity.onComplete())
+                .doOnError(e -> subscriberActivity.onError(e))
+                .takeUntil(publisherActivity)
+                .doOnCancel(() -> subscriberActivity.onComplete())
+                .subscribe(subscriber);
+        
+        Flowable<? extends R> outlet = Flowable.fromPublisher(publisher)
+                .doOnComplete(() -> publisherActivity.onComplete())
+                .doOnError(e -> publisherActivity.onError(e))
+                .takeUntil(subscriberActivity)
+                .doOnCancel(() -> publisherActivity.onComplete())
+                ;
+
+        return new RxJavaProcessorBuilder<>(inlet, outlet);
     }
 
 }

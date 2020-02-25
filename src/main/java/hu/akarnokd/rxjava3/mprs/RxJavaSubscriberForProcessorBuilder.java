@@ -16,30 +16,40 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
+import java.util.concurrent.CompletionStage;
+import java.util.function.Function;
+
 import org.eclipse.microprofile.reactive.streams.operators.*;
 import org.eclipse.microprofile.reactive.streams.operators.spi.ReactiveStreamsEngine;
 import org.reactivestreams.Subscriber;
 
 import io.reactivex.rxjava3.core.FlowableSubscriber;
 
-public final class RxJavaSubscriberBuilder<T> implements SubscriberBuilder<T, Void> {
+public final class RxJavaSubscriberForProcessorBuilder<T, U, R> implements SubscriberBuilder<T, R> {
 
-    final Subscriber<? super T> subscriber;
+    final Subscriber<T> front;
     
-    public RxJavaSubscriberBuilder(Subscriber<? super T> subscriber) {
-        this.subscriber = subscriber;
+    final U source;
+    
+    final Function<U, CompletionStage<R>> toStage;
+
+    public RxJavaSubscriberForProcessorBuilder(Subscriber<T> front, U source, 
+            Function<U, CompletionStage<R>> toStage) {
+        this.front = front;
+        this.source = source;
+        this.toStage = toStage;
     }
     
     @Override
-    public CompletionSubscriber<T, Void> build() {
-        if (subscriber instanceof FlowableSubscriber) {
-            return new RxJavaCompletionFlowableSubscriber<>(subscriber);
+    public CompletionSubscriber<T, R> build() {
+        if (front instanceof FlowableSubscriber) {
+            return new RxJavaCompletionFlowableSubscriberStage<>(front, toStage.apply(source));
         }
-        return new RxJavaCompletionSubscriber<>(subscriber);
+        return new RxJavaCompletionSubscriberStage<>(front, toStage.apply(source));
     }
 
     @Override
-    public CompletionSubscriber<T, Void> build(ReactiveStreamsEngine engine) {
+    public CompletionSubscriber<T, R> build(ReactiveStreamsEngine engine) {
         return build();
     }
 

@@ -23,11 +23,11 @@ import org.eclipse.microprofile.reactive.streams.operators.CompletionRunner;
 import org.eclipse.microprofile.reactive.streams.operators.spi.ReactiveStreamsEngine;
 import org.reactivestreams.*;
 
-import io.reactivex.rxjava3.core.Flowable;
+import io.reactivex.rxjava3.core.*;
 
-final class RxJavaCompletionRunnerSubscriber<T> 
+final class RxJavaCompletionRunnerFlowableSubscriber<T> 
 extends AtomicBoolean
-implements CompletionRunner<Void>, Subscriber<T>, Subscription {
+implements CompletionRunner<Void>, FlowableSubscriber<T>, Subscription {
 
     private static final long serialVersionUID = 6640182020510123315L;
 
@@ -39,7 +39,7 @@ implements CompletionRunner<Void>, Subscriber<T>, Subscription {
 
     Subscription upstream;
 
-    RxJavaCompletionRunnerSubscriber(Flowable<T> source, Subscriber<? super T> subscriber) {
+    RxJavaCompletionRunnerFlowableSubscriber(Flowable<T> source, Subscriber<? super T> subscriber) {
         this.source = source;
         this.subscriber = subscriber;
     }
