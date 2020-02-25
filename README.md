@@ -3,7 +3,7 @@ RxJava 3 service implementation for the Eclipse Microprofile Reactive Streams Op
 
 <a href='https://travis-ci.org/akarnokd/RxJavaMicroprofileRS/builds'><img src='https://travis-ci.org/akarnokd/RxJavaMicroprofileRS.svg?branch=master'></a>
 [![codecov.io](http://codecov.io/github/akarnokd/RxJavaMicroprofileRS/coverage.svg?branch=master)](http://codecov.io/github/akarnokd/RxJavaMicroprofileRS?branch=master)
-[![Maven Central](https://maven-badges.herokuapp.com/maven-central/com.github.akarnokd/rxjava3-bridge/badge.svg)](https://maven-badges.herokuapp.com/maven-central/com.github.akarnokd/rxjava3-bridge)
+[![Maven Central](https://maven-badges.herokuapp.com/maven-central/com.github.akarnokd/rxjava3-microprofile-rs/badge.svg)](https://maven-badges.herokuapp.com/maven-central/com.github.akarnokd/rxjava3-microprofile-rs)
 
 RxJava 3: [![Maven Central](https://maven-badges.herokuapp.com/maven-central/io.reactivex.rxjava3/rxjava/badge.svg)](https://maven-badges.herokuapp.com/maven-central/io.reactivex.rxjava3/rxjava)
 
