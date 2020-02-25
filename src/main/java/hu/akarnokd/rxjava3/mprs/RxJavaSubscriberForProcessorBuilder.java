@@ -16,39 +16,41 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
+import java.util.List;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 
 import org.eclipse.microprofile.reactive.streams.operators.*;
 import org.eclipse.microprofile.reactive.streams.operators.spi.*;
-import org.reactivestreams.Subscriber;
 
-import io.reactivex.rxjava3.core.FlowableSubscriber;
+import io.reactivex.rxjava3.core.*;
 
-final class RxJavaSubscriberForProcessorBuilder<T, U, R> implements SubscriberBuilder<T, R> {
+final class RxJavaSubscriberForProcessorBuilder<T, U, R> implements SubscriberBuilder<T, R>, ToGraphable {
 
-    final Subscriber<T> front;
+    final FlowableTransformer<?, ?>[] transformers;
     
-    final U source;
-    
-    final Function<U, CompletionStage<R>> toStage;
+    final Function<Flowable<U>, CompletionStage<R>> toStage;
 
     final RxJavaGraphBuilder graph;
 
-    public RxJavaSubscriberForProcessorBuilder(Subscriber<T> front, U source, 
-            Function<U, CompletionStage<R>> toStage) {
-        this.front = front;
-        this.source = source;
+    public RxJavaSubscriberForProcessorBuilder(
+            List<FlowableTransformer<?, ?>> transformers,
+            Function<Flowable<U>, CompletionStage<R>> toStage) {
+        this.transformers = transformers.toArray(new FlowableTransformer[transformers.size()]);
         this.toStage = toStage;
         this.graph = RxJavaMicroprofilePlugins.buildGraph() ? new RxJavaListGraphBuilder() : RxJavaNoopGraphBuilder.INSTANCE;
     }
     
+    @SuppressWarnings({ "rawtypes", "unchecked" })
     @Override
     public CompletionSubscriber<T, R> build() {
-        if (front instanceof FlowableSubscriber) {
-            return new RxJavaCompletionFlowableSubscriberStage<>(front, toStage.apply(source));
+        DeferredProcessor<T> dp = new DeferredProcessor<>();
+        Flowable f = dp;
+        for (FlowableTransformer<?, ?> ft : transformers) {
+            f = Flowable.fromPublisher(ft.apply(f));
         }
-        return new RxJavaCompletionSubscriberStage<>(front, toStage.apply(source));
+        CompletionStage st = toStage.apply(f);
+        return new RxJavaCompletionFlowableSubscriberStage<>(dp, st);
     }
 
     @SuppressWarnings({ "unchecked", "rawtypes" })
@@ -64,4 +66,8 @@ final class RxJavaSubscriberForProcessorBuilder<T, U, R> implements SubscriberBu
         return new RxJavaCompletionSubscriberStage(buildSubscriber.getSubscriber(), buildSubscriber.getCompletion());
     }
 
+    @Override
+    public Graph toGraph() {
+        return graph;
+    }
 }

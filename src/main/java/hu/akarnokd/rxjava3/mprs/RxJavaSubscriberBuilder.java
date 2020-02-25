@@ -17,17 +17,20 @@
 package hu.akarnokd.rxjava3.mprs;
 
 import org.eclipse.microprofile.reactive.streams.operators.*;
-import org.eclipse.microprofile.reactive.streams.operators.spi.ReactiveStreamsEngine;
+import org.eclipse.microprofile.reactive.streams.operators.spi.*;
 import org.reactivestreams.Subscriber;
 
 import io.reactivex.rxjava3.core.FlowableSubscriber;
 
-final class RxJavaSubscriberBuilder<T> implements SubscriberBuilder<T, Void> {
+final class RxJavaSubscriberBuilder<T> implements SubscriberBuilder<T, Void>, ToGraphable {
 
     final Subscriber<? super T> subscriber;
     
+    final RxJavaGraphBuilder graph;
+    
     public RxJavaSubscriberBuilder(Subscriber<? super T> subscriber) {
         this.subscriber = subscriber;
+        this.graph = RxJavaMicroprofilePlugins.buildGraph() ? new RxJavaListGraphBuilder() : RxJavaNoopGraphBuilder.INSTANCE;
     }
     
     @Override
@@ -40,7 +43,15 @@ final class RxJavaSubscriberBuilder<T> implements SubscriberBuilder<T, Void> {
 
     @Override
     public CompletionSubscriber<T, Void> build(ReactiveStreamsEngine engine) {
-        return build();
+        if (engine instanceof RxJavaEngine) {
+            return build();
+        }
+        SubscriberWithCompletionStage<T, Void> buildSubscriber = engine.buildSubscriber(graph);
+        return CompletionSubscriber.of(buildSubscriber.getSubscriber(), buildSubscriber.getCompletion());
     }
 
+    @Override
+    public Graph toGraph() {
+        return graph;
+    }
 }

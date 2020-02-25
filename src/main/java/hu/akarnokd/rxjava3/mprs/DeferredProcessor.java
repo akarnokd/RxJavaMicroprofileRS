@@ -16,6 +16,7 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
+import java.util.Objects;
 import java.util.concurrent.atomic.*;
 
 import org.reactivestreams.*;
@@ -64,11 +65,13 @@ final class DeferredProcessor<@NonNull T> extends FlowableProcessor<T> implement
 
     @Override
     public void onNext(@NonNull T t) {
+        Objects.requireNonNull(t, "t is null");
         downstream.get().onNext(t);
     }
 
     @Override
     public void onError(Throwable t) {
+        Objects.requireNonNull(t, "t is null");
         error = t;
         // null -> DONE: deliver onError later
         // s -> DONE: deliver error now

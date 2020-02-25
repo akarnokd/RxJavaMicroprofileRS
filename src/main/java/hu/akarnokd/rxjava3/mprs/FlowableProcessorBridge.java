@@ -16,6 +16,8 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
+import java.util.Objects;
+
 import org.reactivestreams.*;
 
 import io.reactivex.rxjava3.core.Flowable;
@@ -38,11 +40,13 @@ final class FlowableProcessorBridge<T, R> implements Processor<T, R> {
 
     @Override
     public void onNext(T t) {
+        Objects.requireNonNull(t, "t is null");
         front.onNext(t);
     }
 
     @Override
     public void onError(Throwable t) {
+        Objects.requireNonNull(t, "t is null");
         front.onError(t);
     }
 

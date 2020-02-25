@@ -29,9 +29,9 @@ import io.reactivex.rxjava3.core.*;
  * assembly instructions in a {@link Graph} into RxJava
  * {@link Flowable}-based flows and components.
  */
-public final class RxJavaEngine implements ReactiveStreamsEngine {
+public enum RxJavaEngine implements ReactiveStreamsEngine {
 
-    public static final ReactiveStreamsEngine INSTANCE = new RxJavaEngine();
+    INSTANCE;
 
     private RxJavaEngine() {
         // singleton
@@ -220,7 +220,7 @@ public final class RxJavaEngine implements ReactiveStreamsEngine {
             }
             if (stage instanceof Stage.OnTerminate) {
                 Runnable runnable = ((Stage.OnTerminate) stage).getAction();
-                result = result.doOnTerminate(() -> runnable.run());
+                result = new FlowableDoOnTerminateAndCancel<>(result, runnable);
                 continue;
             }
             if (stage instanceof Stage.OnComplete) {

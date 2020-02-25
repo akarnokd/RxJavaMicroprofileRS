@@ -34,4 +34,12 @@ interface RxJavaGraphBuilder extends Graph {
      * @param stage the stage to add, not null (not verified)
      */
     void add(Stage stage);
+
+    default void addAll(Graph g) {
+        if (g != RxJavaNoopGraphBuilder.INSTANCE) {
+            for (Stage s : g.getStages()) {
+                add(s);
+            }
+        }
+    }
 }

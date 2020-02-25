@@ -30,8 +30,10 @@ import io.reactivex.rxjava3.processors.PublishProcessor;
 /**
  * Constructs RxJava-based PublisherBuilders.
  */
-public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
+public enum RxJavaPublisherFactory implements ReactiveStreamsFactory {
 
+    INSTANCE;
+    
     @Override
     public <T> PublisherBuilder<T> fromPublisher(
             Publisher<? extends T> publisher) {
@@ -99,18 +101,15 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
 
     @Override
     public <T> ProcessorBuilder<T, T> builder() {
-        DeferredProcessor<T> processor = new DeferredProcessor<>();
-        RxJavaProcessorBuilder<T, T> result = new RxJavaProcessorBuilder<>(processor, processor);
-        if (result.graph.isEnabled()) {
-            result.graph.add((Stage.ProcessorStage)() -> processor);
-        }
+        RxJavaProcessorBuilder<T, T> result = new RxJavaProcessorBuilder<>();
         return result;
     }
 
     @Override
     public <T, R> ProcessorBuilder<T, R> fromProcessor(
             Processor<? super T, ? extends R> processor) {
-        RxJavaProcessorBuilder<T, R> result = new RxJavaProcessorBuilder<>(processor, Flowable.fromPublisher(processor));
+        Objects.requireNonNull(processor, "processor is null");
+        RxJavaProcessorBuilder<T, R> result = new RxJavaProcessorBuilder<>(processor);
         if (result.graph.isEnabled()) {
             result.graph.add((Stage.ProcessorStage)() -> processor);
         }
@@ -121,6 +120,7 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
     @Override
     public <T> SubscriberBuilder<T, Void> fromSubscriber(
             Subscriber<? extends T> subscriber) {
+        Objects.requireNonNull(subscriber, "processor is null");
         // FIXME the signature is wrong, at least let it compile
         // TODO graph specificiation?
         return new RxJavaSubscriberBuilder<>((Subscriber<T>)subscriber);
@@ -129,6 +129,7 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
     @Override
     @SuppressWarnings({ "unchecked", "rawtypes" })
     public <T> PublisherBuilder<T> iterate(T seed, UnaryOperator<T> f) {
+        Objects.requireNonNull(f, "f is null");
         RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(Flowable.generate(() -> seed, (s, e) -> {
             e.onNext(s);
             return f.apply(s);
@@ -163,6 +164,7 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
 
     @Override
     public <T> PublisherBuilder<T> generate(Supplier<? extends T> s) {
+        Objects.requireNonNull(s, "s is null");
         RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(Flowable.generate(e -> e.onNext(s.get())));
         if (result.graph.isEnabled()) {
             // TODO there is no Stage.Generate
@@ -271,7 +273,7 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
                 .doOnCancel(() -> publisherActivity.onComplete())
                 ;
 
-        RxJavaProcessorBuilder<T, R> result = new RxJavaProcessorBuilder<>(inlet, outlet);
+        RxJavaProcessorBuilder<T, R> result = new RxJavaProcessorBuilder<>(new FlowableProcessorBridge<>(inlet, outlet));
         if (result.graph.isEnabled()) {
             result.graph.add(new Stage.Coupled() {
 

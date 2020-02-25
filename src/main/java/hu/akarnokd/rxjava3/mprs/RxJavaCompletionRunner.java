@@ -20,9 +20,9 @@ import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 
 import org.eclipse.microprofile.reactive.streams.operators.CompletionRunner;
-import org.eclipse.microprofile.reactive.streams.operators.spi.ReactiveStreamsEngine;
+import org.eclipse.microprofile.reactive.streams.operators.spi.*;
 
-final class RxJavaCompletionRunner<T, R> implements CompletionRunner<R> {
+final class RxJavaCompletionRunner<T, R> implements CompletionRunner<R>, ToGraphable {
 
     final T source;
     
@@ -49,4 +49,8 @@ final class RxJavaCompletionRunner<T, R> implements CompletionRunner<R> {
         return engine.buildCompletion(graph);
     }
 
+    @Override
+    public Graph toGraph() {
+        return graph;
+    }
 }

@@ -16,6 +16,8 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
+import java.util.Objects;
+
 import org.reactivestreams.*;
 
 import io.reactivex.rxjava3.annotations.NonNull;
@@ -40,11 +42,13 @@ final class BasicProcessor<T> extends Flowable<T> implements Processor<T, T> {
 
     @Override
     public void onNext(T t) {
+        Objects.requireNonNull(t, "t is null");
         downstream.onNext(t);
     }
 
     @Override
     public void onError(Throwable t) {
+        Objects.requireNonNull(t, "t is null");
         downstream.onError(t);
     }
 
