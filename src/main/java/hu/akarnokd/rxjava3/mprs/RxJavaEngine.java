@@ -24,6 +24,11 @@ import org.reactivestreams.*;
 
 import io.reactivex.rxjava3.core.*;
 
+/**
+ * An RxJava-based {@link ReactiveStreamsEngine} that translates the
+ * assembly instructions in a {@link Graph} into RxJava
+ * {@link Flowable}-based flows and components.
+ */
 public final class RxJavaEngine implements ReactiveStreamsEngine {
 
     public static final ReactiveStreamsEngine INSTANCE = new RxJavaEngine();
@@ -32,71 +37,122 @@ public final class RxJavaEngine implements ReactiveStreamsEngine {
         // singleton
     }
 
-    static void requireNull(Object o, Stage stage) {
+    @Override
+    @SuppressWarnings("unchecked")
+    public <T> Publisher<T> buildPublisher(Graph graph)
+            throws UnsupportedStageException {
+        return (Publisher<T>)build(graph, Mode.PUBLISHER);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public <T, R> SubscriberWithCompletionStage<T, R> buildSubscriber(
+            Graph graph) throws UnsupportedStageException {
+        return (SubscriberWithCompletionStage<T, R>)build(graph, Mode.SUBSCRIBER);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public <T, R> Processor<T, R> buildProcessor(Graph graph)
+            throws UnsupportedStageException {
+        return (Processor<T, R>)build(graph, Mode.PROCESSOR);
+    }
+
+    @Override
+    public <T> CompletionStage<T> buildCompletion(Graph graph)
+            throws UnsupportedStageException {
+        return this.<T, T>buildSubscriber(graph).getCompletion();
+    }
+    
+    enum Mode {
+        PUBLISHER,
+        PROCESSOR,
+        SUBSCRIBER
+    }
+
+    static void requireNullSource(Object o, Stage stage) {
         if (o != null) {
             throw new IllegalArgumentException("Graph already has a source-like stage! Found " + stage.getClass().getSimpleName());
         }
     }
 
-    @Override
-    @SuppressWarnings({ "rawtypes", "unchecked"})
-    public <T> Publisher<T> buildPublisher(Graph graph)
-            throws UnsupportedStageException {
+    static void requireNullTerminal(Object o, Stage stage) {
+        if (o != null) {
+            throw new IllegalArgumentException("Graph already has a terminal stage! Found " + stage.getClass().getSimpleName());
+        }
+    }
+
+    @SuppressWarnings({ "unchecked", "rawtypes" })
+    static Object build(Graph graph, Mode mode) throws UnsupportedStageException {
+        Subscriber front = null;
         Flowable result = null;
+        CompletionStage completion = null;
         
         for (Stage stage : graph.getStages()) {
 
             if (stage instanceof Stage.PublisherStage) {
-                requireNull(result, stage);
+                requireNullSource(result, stage);
                 
                 Publisher publisher = ((Stage.PublisherStage)stage).getRsPublisher();
                 result = Flowable.fromPublisher(publisher);
                 continue;
             }
             if (stage instanceof Stage.Of) {
-                requireNull(result, stage);
+                requireNullSource(result, stage);
 
                 Iterable iterable = ((Stage.Of)stage).getElements();
                 result = Flowable.fromIterable(iterable);
                 continue;
             }
             if (stage instanceof Stage.ProcessorStage) {
-                requireNull(result, stage);
-                
-                Publisher publisher = ((Stage.ProcessorStage)stage).getRsProcessor();
-                result = Flowable.fromPublisher(publisher);
+                if (result == null) {
+                    // act as a source
+                    Publisher publisher = ((Stage.ProcessorStage)stage).getRsProcessor();
+                    result = Flowable.fromPublisher(publisher);
+                } else {
+                    // act as a middle operator
+                    Processor processor = ((Stage.ProcessorStage)stage).getRsProcessor();
+                    // FIXME should this be deferred for when the downstream actually subscribes?
+                    result.subscribe(processor);
+                    result = Flowable.fromPublisher(processor);
+                }
                 continue;
             }
             if (stage instanceof Stage.Failed) {
-                requireNull(result, stage);
+                requireNullSource(result, stage);
 
                 Throwable throwable = ((Stage.Failed)stage).getError();
                 result = Flowable.error(throwable);
                 continue;
             }
             if (stage instanceof Stage.Concat) {
-                requireNull(result, stage);
+                requireNullSource(result, stage);
                 Graph g1 = ((Stage.Concat)stage).getFirst();
                 Graph g2 = ((Stage.Concat)stage).getSecond();
-                result = Flowable.concat(buildPublisher(g1), buildPublisher(g2));
+                result = Flowable.concat((Publisher)build(g1, Mode.PUBLISHER), (Publisher)build(g2, Mode.PUBLISHER));
                 continue;
             }
             if (stage instanceof Stage.FromCompletionStage) {
-                requireNull(result, stage);
+                requireNullSource(result, stage);
                 CompletionStage cs = ((Stage.FromCompletionStage) stage).getCompletionStage();
                 result = Flowable.fromCompletionStage(cs);
                 continue;
             }
             if (stage instanceof Stage.FromCompletionStageNullable) {
-                requireNull(result, stage);
+                requireNullSource(result, stage);
                 CompletionStage cs = ((Stage.FromCompletionStageNullable) stage).getCompletionStage();
                 result = Maybe.fromCompletionStage(cs).toFlowable();
                 continue;
             }
-            // FIXME not sure how to handle this for a Publisher output
             if (stage instanceof Stage.Coupled) {
-                requireNull(result, stage);
-                throw new UnsupportedStageException(stage);
+                if (mode == Mode.PROCESSOR) {
+                    requireNullSource(result, stage);
+                    Stage.Coupled coupled = (Stage.Coupled) stage;
+                    front = ((SubscriberWithCompletionStage)build(coupled.getSubscriber(), Mode.SUBSCRIBER)).getSubscriber();
+                    result = Flowable.fromPublisher((Publisher)build(coupled.getPublisher(), Mode.PUBLISHER));
+                    continue;
+                }
+                throw new IllegalArgumentException("Stage.Coupled is only supported when building via buildProcessor");
             }
             
             // ------------------------------------------------------------------------------
@@ -182,46 +238,107 @@ public final class RxJavaEngine implements ReactiveStreamsEngine {
                 result = result.onErrorResumeNext(e -> INSTANCE.buildPublisher((Graph)mapper.apply(e)));
                 continue;
             }
-            // FIXME not sure how to handle this for a Publisher output
             if (stage instanceof Stage.FindFirst) {
+                if (mode == Mode.SUBSCRIBER) {
+                    requireNullTerminal(front, stage);
+                    requireNullTerminal(completion, stage);
+
+                    RxJavaFindFirstSubscriber cs = new RxJavaFindFirstSubscriber();
+                    front = cs;
+                    completion = cs.completable;
+
+                    continue;
+                }
+                throw new IllegalArgumentException("Stage.FindFirst is only supported when building via buildSubscriber");
             }
-            // FIXME not sure how to handle this for a Publisher output
             if (stage instanceof Stage.SubscriberStage) {
+                if (mode == Mode.SUBSCRIBER) {
+                    requireNullTerminal(front, stage);
+                    requireNullTerminal(completion, stage);
+
+                    Subscriber s = ((Stage.SubscriberStage) stage).getRsSubscriber();
+                    RxJavaCompletionSubscriber cs;
+                    if (s instanceof FlowableSubscriber) {
+                        cs = new RxJavaCompletionFlowableSubscriber(s);
+                    } else {
+                        cs = new RxJavaCompletionSubscriber(s);
+                    }
+                    front = cs;
+                    completion = cs.getCompletion();
+
+                    continue;
+                }
+                throw new IllegalArgumentException("Stage.FindFirst is only supported when building via buildSubscriber");
             }
-            // FIXME not sure how to handle this for a Publisher output
             if (stage instanceof Stage.Collect) {
+                if (mode == Mode.SUBSCRIBER) {
+                    requireNullTerminal(front, stage);
+                    requireNullTerminal(completion, stage);
+
+                    Stage.Collect collect = (Stage.Collect) stage;
+                    
+                    RxJavaCollectSubscriber cs = new RxJavaCollectSubscriber(collect.getCollector());
+                    front = cs;
+                    completion = cs.completable;
+                    
+                    continue;
+                }
+                throw new IllegalArgumentException("Stage.FindFirst is only supported when building via buildSubscriber");
             }
-            // FIXME not sure how to handle this for a Publisher output
             if (stage instanceof Stage.Cancel) {
+                if (mode == Mode.SUBSCRIBER) {
+                    requireNullTerminal(front, stage);
+                    requireNullTerminal(completion, stage);
+
+                    RxJavaCancelSubscriber cs = new RxJavaCancelSubscriber();
+                    front = cs;
+                    completion = cs.completable;
+                    
+                    continue;
+                }
+                throw new IllegalArgumentException("Stage.FindFirst is only supported when building via buildSubscriber");
             }
 
             throw new UnsupportedStageException(stage);
         }
         
-        if (result == null) {
-            throw new IllegalArgumentException("The graph had no stages.");
+        if (mode == Mode.PUBLISHER) {
+            if (result == null) {
+                throw new IllegalArgumentException("The graph had no usable stages for builing a Publisher.");
+            }
+            return result;
         }
-        return result;
+        if (mode == Mode.PROCESSOR) {
+            if (front == null || result == null) {
+                throw new IllegalArgumentException("The graph had no usable stages for builing a Processor.");
+            }
+            return new FlowableProcessorBridge(front, result);
+        }
+        if (front == null || completion == null) {
+            throw new IllegalArgumentException("The graph had no usable stages for builing a Subscriber.");
+        }
+        return new InnerSubscriberWithCompletionStage(front, completion);
     }
 
-    @Override
-    public <T, R> SubscriberWithCompletionStage<T, R> buildSubscriber(
-            Graph graph) throws UnsupportedStageException {
-        // TODO Auto-generated method stub
-        return null;
-    }
+    static final class InnerSubscriberWithCompletionStage<T, R> implements SubscriberWithCompletionStage<T, R>{
+        
+        final CompletionStage<R> completion;
+        
+        final Subscriber<T> front;
+        
+        InnerSubscriberWithCompletionStage(Subscriber<T> front, CompletionStage<R> completion) {
+            this.front = front;
+            this.completion = completion;
+        }
+        
+        @Override
+        public CompletionStage<R> getCompletion() {
+            return completion;
+        }
 
-    @Override
-    public <T, R> Processor<T, R> buildProcessor(Graph graph)
-            throws UnsupportedStageException {
-        // TODO Auto-generated method stub
-        return null;
+        @Override
+        public Subscriber<T> getSubscriber() {
+            return front;
+        }
     }
-
-    @Override
-    public <T> CompletionStage<T> buildCompletion(Graph graph)
-            throws UnsupportedStageException {
-        return this.<T, T>buildSubscriber(graph).getCompletion();
-    }
-
 }

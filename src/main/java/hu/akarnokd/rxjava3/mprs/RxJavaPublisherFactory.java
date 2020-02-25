@@ -16,10 +16,12 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
+import java.util.*;
 import java.util.concurrent.CompletionStage;
 import java.util.function.*;
 
 import org.eclipse.microprofile.reactive.streams.operators.*;
+import org.eclipse.microprofile.reactive.streams.operators.spi.*;
 import org.reactivestreams.*;
 
 import io.reactivex.rxjava3.core.*;
@@ -33,24 +35,43 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
     @Override
     public <T> PublisherBuilder<T> fromPublisher(
             Publisher<? extends T> publisher) {
-        return new RxJavaPublisherBuilder<>(Flowable.fromPublisher(publisher));
+        RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(Flowable.fromPublisher(publisher));
+        if (result.graph.isEnabled()) {
+            result.graph.add((Stage.PublisherStage)() -> publisher);
+        }
+        return result;
     }
 
     @Override
     public <T> PublisherBuilder<T> of(T t) {
-        return new RxJavaPublisherBuilder<>(Flowable.just(t));
+        RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(Flowable.just(t));
+        if (result.graph.isEnabled()) {
+            Collection<T> coll = Collections.singletonList(t);
+            result.graph.add((Stage.Of)() -> coll);
+        }
+        return result;
     }
 
     /* final: Java 8 workaround for safevarargs */
     @Override
     @SafeVarargs
     public final <T> PublisherBuilder<T> of(T... ts) {
-        return new RxJavaPublisherBuilder<>(Flowable.fromArray(ts));
+        RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(Flowable.fromArray(ts));
+        if (result.graph.isEnabled()) {
+            Collection<T> coll = Arrays.asList(ts);
+            result.graph.add((Stage.Of)() -> coll);
+        }
+        return result;
     }
 
     @Override
     public <T> PublisherBuilder<T> empty() {
-        return new RxJavaPublisherBuilder<>(Flowable.empty());
+        RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(Flowable.empty());
+        if (result.graph.isEnabled()) {
+            Collection<T> coll = Collections.emptyList();
+            result.graph.add((Stage.Of)() -> coll);
+        }
+        return result;
     }
 
     @Override
@@ -60,24 +81,40 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
 
     @Override
     public <T> PublisherBuilder<T> fromIterable(Iterable<? extends T> ts) {
-        return new RxJavaPublisherBuilder<>(Flowable.fromIterable(ts));
+        RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(Flowable.fromIterable(ts));
+        if (result.graph.isEnabled()) {
+            result.graph.add((Stage.Of)() -> ts);
+        }
+        return result;
     }
 
     @Override
     public <T> PublisherBuilder<T> failed(Throwable t) {
-        return new RxJavaPublisherBuilder<>(Flowable.error(t));
+        RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(Flowable.error(t));
+        if (result.graph.isEnabled()) {
+            result.graph.add((Stage.Failed)() -> t);
+        }
+        return result;
     }
 
     @Override
     public <T> ProcessorBuilder<T, T> builder() {
         DeferredProcessor<T> processor = new DeferredProcessor<>();
-        return new RxJavaProcessorBuilder<>(processor, processor);
+        RxJavaProcessorBuilder<T, T> result = new RxJavaProcessorBuilder<>(processor, processor);
+        if (result.graph.isEnabled()) {
+            result.graph.add((Stage.ProcessorStage)() -> processor);
+        }
+        return result;
     }
 
     @Override
     public <T, R> ProcessorBuilder<T, R> fromProcessor(
             Processor<? super T, ? extends R> processor) {
-        return new RxJavaProcessorBuilder<>(processor, Flowable.fromPublisher(processor));
+        RxJavaProcessorBuilder<T, R> result = new RxJavaProcessorBuilder<>(processor, Flowable.fromPublisher(processor));
+        if (result.graph.isEnabled()) {
+            result.graph.add((Stage.ProcessorStage)() -> processor);
+        }
+        return result;
     }
 
     @SuppressWarnings("unchecked")
@@ -85,20 +122,63 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
     public <T> SubscriberBuilder<T, Void> fromSubscriber(
             Subscriber<? extends T> subscriber) {
         // FIXME the signature is wrong, at least let it compile
+        // TODO graph specificiation?
         return new RxJavaSubscriberBuilder<>((Subscriber<T>)subscriber);
     }
 
     @Override
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public <T> PublisherBuilder<T> iterate(T seed, UnaryOperator<T> f) {
-        return new RxJavaPublisherBuilder<>(Flowable.generate(() -> seed, (s, e) -> {
+        RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(Flowable.generate(() -> seed, (s, e) -> {
             e.onNext(s);
             return f.apply(s);
         }));
+        if (result.graph.isEnabled()) {
+            // TODO there is no Stage.Iterate
+            result.graph.add((Stage.Of)() -> () -> (Iterator)new Iterator<T>() {
+                
+                T last = seed;
+                boolean once;
+                
+                @Override
+                public boolean hasNext() {
+                    return true;
+                }
+                
+                @Override
+                public T next() {
+                    if (!once) {
+                        once = true;
+                        return last;
+                    }
+                    T o = f.apply(last);
+                    last = o;
+                    return o;
+                    
+                }
+            });
+        }
+        return result;
     }
 
     @Override
     public <T> PublisherBuilder<T> generate(Supplier<? extends T> s) {
-        return new RxJavaPublisherBuilder<>(Flowable.generate(e -> e.onNext(s.get())));
+        RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(Flowable.generate(e -> e.onNext(s.get())));
+        if (result.graph.isEnabled()) {
+            // TODO there is no Stage.Generate
+            result.graph.add((Stage.Of)() -> () -> new Iterator<Object>() {
+                @Override
+                public boolean hasNext() {
+                    return true;
+                }
+                
+                @Override
+                public Object next() {
+                    return s.get();
+                }
+            });
+        }
+        return result;
     }
 
     @Override
@@ -117,22 +197,48 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
         } else {
             source2 = Flowable.fromPublisher(b.buildRs());
         }
-        return new RxJavaPublisherBuilder<>(
+        RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(
                 Flowable.concat(source1, source2));
+        
+        if (result.graph.isEnabled()) {
+            result.graph.add(new Stage.Concat() {
+                
+                @Override
+                public Graph getSecond() {
+                    return RxJavaGraphCaptureEngine.capture(b);
+                }
+                
+                @Override
+                public Graph getFirst() {
+                    return RxJavaGraphCaptureEngine.capture(a);
+                }
+            });
+        }
+        return result;
     }
 
     @Override
     @SuppressWarnings("unchecked")
     public <T> PublisherBuilder<T> fromCompletionStage(
             CompletionStage<? extends T> completionStage) {
-        return new RxJavaPublisherBuilder<>(Flowable.fromCompletionStage((CompletionStage<T>)completionStage));
+        RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(
+                Flowable.fromCompletionStage((CompletionStage<T>)completionStage));
+        if (result.graph.isEnabled()) {
+            result.graph.add((Stage.FromCompletionStage)() -> completionStage);
+        }
+        return result;
     }
 
     @Override
     @SuppressWarnings("unchecked")
     public <T> PublisherBuilder<T> fromCompletionStageNullable(
             CompletionStage<? extends T> completionStage) {
-        return new RxJavaPublisherBuilder<>(Maybe.fromCompletionStage((CompletionStage<T>)completionStage).toFlowable());
+        RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(
+                        Maybe.fromCompletionStage((CompletionStage<T>)completionStage).toFlowable());
+        if (result.graph.isEnabled()) {
+            result.graph.add((Stage.FromCompletionStageNullable)() -> completionStage);
+        }
+        return result;
     }
 
     @Override
@@ -165,7 +271,25 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
                 .doOnCancel(() -> publisherActivity.onComplete())
                 ;
 
-        return new RxJavaProcessorBuilder<>(inlet, outlet);
+        RxJavaProcessorBuilder<T, R> result = new RxJavaProcessorBuilder<>(inlet, outlet);
+        if (result.graph.isEnabled()) {
+            result.graph.add(new Stage.Coupled() {
+
+                @Override
+                public Graph getSubscriber() {
+                    Collection<Stage> coll = Collections.singletonList((Stage.SubscriberStage)() -> subscriber);
+                    return (Graph)() -> coll;
+                }
+
+                @Override
+                public Graph getPublisher() {
+                    Collection<Stage> coll = Collections.singletonList((Stage.PublisherStage)() -> publisher);
+                    return (Graph)() -> coll;
+                }
+                
+            });
+        }
+        return result;
     }
 
 }

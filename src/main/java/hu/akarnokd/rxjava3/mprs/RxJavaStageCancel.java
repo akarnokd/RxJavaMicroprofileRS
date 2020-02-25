@@ -16,30 +16,13 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
-import java.util.*;
-
 import org.eclipse.microprofile.reactive.streams.operators.spi.Stage;
 
 /**
- * Collects the various {@link Stage} instances into an internal {@link List}.
+ * The {@link org.eclipse.microprofile.reactive.streams.operators.spi.Stage.Cancel Stage.Cancel} has no
+ * arguments and thus can be a singleton.
  */
-final class RxJavaListGraphBuilder implements RxJavaGraphBuilder {
+enum RxJavaStageCancel implements Stage.Cancel {
 
-    final List<Stage> stages = new ArrayList<>();
-    
-    @Override
-    public Collection<Stage> getStages() {
-        return stages;
-    }
-
-    @Override
-    public boolean isEnabled() {
-        return true;
-    }
-
-    @Override
-    public void add(Stage stage) {
-        stages.add(stage);
-    }
-
+    INSTANCE;
 }

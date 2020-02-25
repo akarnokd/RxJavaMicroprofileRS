@@ -16,16 +16,17 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.eclipse.microprofile.reactive.streams.operators.CompletionRunner;
-import org.eclipse.microprofile.reactive.streams.operators.spi.ReactiveStreamsEngine;
+import org.eclipse.microprofile.reactive.streams.operators.spi.*;
 import org.reactivestreams.*;
 
 import io.reactivex.rxjava3.core.Flowable;
 
-final class RxJavaCompletionRunnerSubscriber<T> 
+class RxJavaCompletionRunnerSubscriber<T> 
 extends AtomicBoolean
 implements CompletionRunner<Void>, Subscriber<T>, Subscription {
 
@@ -58,8 +59,11 @@ implements CompletionRunner<Void>, Subscriber<T>, Subscription {
 
     @Override
     public CompletionStage<Void> run(ReactiveStreamsEngine engine) {
-        // FIXME should we unroll?
-        return run();
+        if (engine instanceof RxJavaEngine) {
+            return run();
+        }
+        Collection<Stage> coll = Collections.singletonList((Stage.SubscriberStage)() -> subscriber);
+        return engine.buildCompletion((Graph)() -> coll);
     }
 
     @Override

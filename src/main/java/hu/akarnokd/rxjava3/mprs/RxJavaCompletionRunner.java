@@ -28,9 +28,12 @@ final class RxJavaCompletionRunner<T, R> implements CompletionRunner<R> {
     
     final Function<T, CompletionStage<R>> transform;
 
+    final RxJavaGraphBuilder graph;
+
     RxJavaCompletionRunner(T source, Function<T, CompletionStage<R>> transform) {
         this.source = source;
         this.transform = transform;
+        this.graph = RxJavaMicroprofilePlugins.buildGraph() ? new RxJavaListGraphBuilder() : RxJavaNoopGraphBuilder.INSTANCE;
     }
     
     @Override
@@ -40,8 +43,10 @@ final class RxJavaCompletionRunner<T, R> implements CompletionRunner<R> {
 
     @Override
     public CompletionStage<R> run(ReactiveStreamsEngine engine) {
-     // FIXME should we unroll the chain?
-        return run();
+        if (engine instanceof RxJavaEngine) {
+            return run();
+        }
+        return engine.buildCompletion(graph);
     }
 
 }

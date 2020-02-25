@@ -20,12 +20,12 @@ import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 
 import org.eclipse.microprofile.reactive.streams.operators.*;
-import org.eclipse.microprofile.reactive.streams.operators.spi.ReactiveStreamsEngine;
+import org.eclipse.microprofile.reactive.streams.operators.spi.*;
 import org.reactivestreams.Subscriber;
 
 import io.reactivex.rxjava3.core.FlowableSubscriber;
 
-public final class RxJavaSubscriberForProcessorBuilder<T, U, R> implements SubscriberBuilder<T, R> {
+final class RxJavaSubscriberForProcessorBuilder<T, U, R> implements SubscriberBuilder<T, R> {
 
     final Subscriber<T> front;
     
@@ -33,11 +33,14 @@ public final class RxJavaSubscriberForProcessorBuilder<T, U, R> implements Subsc
     
     final Function<U, CompletionStage<R>> toStage;
 
+    final RxJavaGraphBuilder graph;
+
     public RxJavaSubscriberForProcessorBuilder(Subscriber<T> front, U source, 
             Function<U, CompletionStage<R>> toStage) {
         this.front = front;
         this.source = source;
         this.toStage = toStage;
+        this.graph = RxJavaMicroprofilePlugins.buildGraph() ? new RxJavaListGraphBuilder() : RxJavaNoopGraphBuilder.INSTANCE;
     }
     
     @Override
@@ -48,9 +51,17 @@ public final class RxJavaSubscriberForProcessorBuilder<T, U, R> implements Subsc
         return new RxJavaCompletionSubscriberStage<>(front, toStage.apply(source));
     }
 
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     @Override
     public CompletionSubscriber<T, R> build(ReactiveStreamsEngine engine) {
-        return build();
+        if (engine instanceof RxJavaEngine) {
+            return build();
+        }
+        SubscriberWithCompletionStage<Object, Object> buildSubscriber = engine.buildSubscriber(graph);
+        if (buildSubscriber.getSubscriber() instanceof FlowableSubscriber) {
+            return new RxJavaCompletionFlowableSubscriberStage(buildSubscriber.getSubscriber(), buildSubscriber.getCompletion());
+        }
+        return new RxJavaCompletionSubscriberStage(buildSubscriber.getSubscriber(), buildSubscriber.getCompletion());
     }
 
 }

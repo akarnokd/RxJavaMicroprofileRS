@@ -22,7 +22,7 @@ import org.reactivestreams.Subscriber;
 
 import io.reactivex.rxjava3.core.FlowableSubscriber;
 
-public final class RxJavaSubscriberBuilder<T> implements SubscriberBuilder<T, Void> {
+final class RxJavaSubscriberBuilder<T> implements SubscriberBuilder<T, Void> {
 
     final Subscriber<? super T> subscriber;
     

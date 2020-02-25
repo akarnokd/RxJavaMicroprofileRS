@@ -18,9 +18,20 @@ package hu.akarnokd.rxjava3.mprs;
 
 import org.eclipse.microprofile.reactive.streams.operators.spi.*;
 
+/**
+ * Base interface for collecting up graph {@link Stage}s. 
+ */
 interface RxJavaGraphBuilder extends Graph {
 
+    /**
+     * @return if true, this builder will accept {@link Stage}s;
+     *         if false, this builder will ignore those stages
+     */
     boolean isEnabled();
 
+    /**
+     * Add a new {@link Stage} to this graph.
+     * @param stage the stage to add, not null (not verified)
+     */
     void add(Stage stage);
 }
