@@ -29,6 +29,8 @@ public final class RxJavaMicroprofilePlugins {
     
     static volatile boolean BUILD_GRAPH;
 
+    static volatile boolean IMMUTABLE_BUILDERS;
+
     /**
      * Globally enable building the Stage graph along with the
      * Flowable graph.
@@ -45,7 +47,33 @@ public final class RxJavaMicroprofilePlugins {
         BUILD_GRAPH = false;
     }
 
+    /**
+     * Returns true if the Stage graph should be built
+     * @return true if the Stage graph should be built
+     */
     public static boolean buildGraph() {
         return BUILD_GRAPH;
+    }
+    
+    /**
+     * Globally enable using immutable builders.
+     */
+    public static void enableImmutableBuilders() {
+        IMMUTABLE_BUILDERS = true;
+    }
+
+    /**
+     * Globally disable using immutable builders.
+     */
+    public static void disableImmutableBuilders() {
+        IMMUTABLE_BUILDERS = false;
+    }
+    
+    /**
+     * Retruns true if builders are immutable.
+     * @return true if builders are immutable
+     */
+    public static boolean immutableBuilders() {
+        return IMMUTABLE_BUILDERS;
     }
 }

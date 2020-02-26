@@ -16,7 +16,6 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
-import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -28,13 +27,15 @@ import io.reactivex.rxjava3.core.Flowable;
 
 class RxJavaCompletionRunnerSubscriber<T> 
 extends AtomicBoolean
-implements CompletionRunner<Void>, Subscriber<T>, Subscription {
+implements CompletionRunner<Void>, Subscriber<T>, Subscription, ToGraphable {
 
     private static final long serialVersionUID = 6640182020510123315L;
 
     final Flowable<T> source;
 
     final Subscriber<? super T> subscriber;
+    
+    final RxJavaGraphBuilder graph;
 
     CompletableFuture<Void> complete;
 
@@ -43,6 +44,7 @@ implements CompletionRunner<Void>, Subscriber<T>, Subscription {
     RxJavaCompletionRunnerSubscriber(Flowable<T> source, Subscriber<? super T> subscriber) {
         this.source = source;
         this.subscriber = subscriber;
+        this.graph = RxJavaMicroprofilePlugins.buildGraph() ? new RxJavaListGraphBuilder() : RxJavaNoopGraphBuilder.INSTANCE;
     }
     
     @Override
@@ -62,8 +64,7 @@ implements CompletionRunner<Void>, Subscriber<T>, Subscription {
         if (engine instanceof RxJavaEngine) {
             return run();
         }
-        Collection<Stage> coll = Collections.singletonList((Stage.SubscriberStage)() -> subscriber);
-        return engine.buildCompletion((Graph)() -> coll);
+        return engine.buildCompletion(graph);
     }
 
     @Override
@@ -105,6 +106,11 @@ implements CompletionRunner<Void>, Subscriber<T>, Subscription {
     public void onComplete() {
         subscriber.onComplete();
         complete.complete(null);
+    }
+
+    @Override
+    public Graph toGraph() {
+        return graph;
     }
 
 }

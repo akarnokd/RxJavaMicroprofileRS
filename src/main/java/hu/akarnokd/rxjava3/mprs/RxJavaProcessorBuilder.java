@@ -18,6 +18,7 @@ package hu.akarnokd.rxjava3.mprs;
 
 import java.util.*;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.*;
 import java.util.stream.*;
 
@@ -29,7 +30,7 @@ import io.reactivex.rxjava3.annotations.NonNull;
 import io.reactivex.rxjava3.core.*;
 
 /**
- * Builds a Flowable-based sequence by applying operators one after the other.
+ * Builds a {@link Flowable}-based sequence by applying operators one after the other.
  * @param <T> the input type of the sequence
  * @param <R> the output value type
  */
@@ -47,7 +48,7 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
     @SuppressWarnings({ "unchecked", "rawtypes" })
     public RxJavaProcessorBuilder(Processor<? super T, ? extends R> processor) {
         this();
-        this.transformers.add(source -> {
+        transformers.add(source -> {
             source.subscribe((Processor)processor);
             return (Processor)processor;
         });
@@ -61,16 +62,30 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
         return input;
     }
 
+    @SuppressWarnings("unchecked")
+    <U, V> RxJavaProcessorBuilder<U, V> getTarget() {
+        if (RxJavaMicroprofilePlugins.immutableBuilders()) {
+            RxJavaProcessorBuilder<T, R> newTarget = new RxJavaProcessorBuilder<>();
+            newTarget.transformers.addAll(transformers);
+            if (newTarget.graph.isEnabled()) {
+                newTarget.graph.addAll(graph);
+            }
+            return (RxJavaProcessorBuilder<U, V>)newTarget;
+        }
+        return (RxJavaProcessorBuilder<U, V>)this;
+    }
+
     @Override
     @SuppressWarnings("unchecked")
     public <S> ProcessorBuilder<T, S> map(
             Function<? super R, ? extends S> mapper) {
         Objects.requireNonNull(mapper, "mapper is null");
-        this.transformers.add(current -> current.map(v -> mapper.apply((R)v)));
-        if (graph.isEnabled()) {
-            graph.add((Stage.Map)() -> mapper);
+        RxJavaProcessorBuilder<T, S> target = getTarget();
+        target.transformers.add(current -> current.map(v -> mapper.apply((R)v)));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.Map)() -> mapper);
         }
-        return (ProcessorBuilder<T, S>)this;
+        return target;
     }
 
     @Override
@@ -78,19 +93,20 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
     public <S> ProcessorBuilder<T, S> flatMap(
             Function<? super R, ? extends PublisherBuilder<? extends S>> mapper) {
         Objects.requireNonNull(mapper, "mapper is null");
-        this.transformers.add(current -> current.concatMap(v -> {
+        RxJavaProcessorBuilder<T, S> target = getTarget();
+        target.transformers.add(current -> current.concatMap(v -> {
             PublisherBuilder<? extends S> pb = mapper.apply((R)v);
             if (pb instanceof RxJavaPublisherBuilder) {
                 return new RxJavaInnerNullGuard<>(((RxJavaPublisherBuilder)pb).current);
             }
             return new RxJavaInnerNullGuard<>(pb.buildRs());
         }));
-        if (graph.isEnabled()) {
-            graph.add((Stage.FlatMap)() -> v -> 
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.FlatMap)() -> v -> 
                 RxJavaGraphCaptureEngine.capture(mapper.apply((R)v))
             );
         }
-        return (ProcessorBuilder<T, S>)this;
+        return target;
     }
 
     @Override
@@ -98,16 +114,17 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
     public <S> ProcessorBuilder<T, S> flatMapRsPublisher(
             Function<? super R, ? extends Publisher<? extends S>> mapper) {
         Objects.requireNonNull(mapper, "mapper is null");
-        this.transformers.add(current -> current.concatMap(v -> mapper.apply((R)v)));
-        if (graph.isEnabled()) {
-            graph.add((Stage.FlatMap)() -> v -> {
-                Publisher p = new RxJavaInnerNullGuard<>(mapper.apply((R)v));
+        RxJavaProcessorBuilder<T, S> target = getTarget();
+        target.transformers.add(current -> current.concatMap(v -> mapper.apply((R)v)));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.FlatMap)() -> v -> {
+                Publisher p = mapper.apply((R)v); // FIXME the RxJavaInnerNullGuard makes one test fail
                 Stage.PublisherStage ps = () -> p;
                 Collection<Stage> coll = Collections.singletonList(ps);
                 return (Graph)() -> coll;
             });
         }
-        return (ProcessorBuilder<T, S>)this;
+        return target;
     }
 
     @Override
@@ -115,11 +132,12 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
     public <S> ProcessorBuilder<T, S> flatMapCompletionStage(
             Function<? super R, ? extends CompletionStage<? extends S>> mapper) {
         Objects.requireNonNull(mapper, "mapper is null");
-        this.transformers.add(current -> current.concatMapSingle(v -> Single.fromCompletionStage((CompletionStage<S>)mapper.apply((R)v))));
-        if (graph.isEnabled()) {
-            graph.add((Stage.FlatMapCompletionStage)() -> (Function)mapper);
+        RxJavaProcessorBuilder<T, S> target = getTarget();
+        target.transformers.add(current -> current.concatMapSingle(v -> Single.fromCompletionStage((CompletionStage<S>)mapper.apply((R)v))));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.FlatMapCompletionStage)() -> (Function)mapper);
         }
-        return (ProcessorBuilder<T, S>)this;
+        return target;
     }
 
     @Override
@@ -127,133 +145,172 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
     public <S> ProcessorBuilder<T, S> flatMapIterable(
             Function<? super R, ? extends Iterable<? extends S>> mapper) {
         Objects.requireNonNull(mapper, "mapper is null");
-        this.transformers.add(current -> current.concatMapIterable(v -> mapper.apply((R)v)));
-        if (graph.isEnabled()) {
-            graph.add((Stage.FlatMapIterable)() -> (Function)mapper);
+        RxJavaProcessorBuilder<T, S> target = getTarget();
+        target.transformers.add(current -> current.concatMapIterable(v -> mapper.apply((R)v)));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.FlatMapIterable)() -> (Function)mapper);
         }
-        return (ProcessorBuilder<T, S>)this;
+        return target;
     }
 
     @SuppressWarnings("unchecked")
     @Override
     public ProcessorBuilder<T, R> filter(Predicate<? super R> predicate) {
         Objects.requireNonNull(predicate, "predicate is null");
-        this.transformers.add(current -> current.filter(v -> predicate.test((R)v)));
-        if (graph.isEnabled()) {
-            graph.add((Stage.Filter)() -> predicate);
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.filter(v -> predicate.test((R)v)));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.Filter)() -> predicate);
         }
-        return this;
+        return target;
     }
 
     @Override
     public ProcessorBuilder<T, R> distinct() {
-        this.transformers.add(current -> current.distinct());
-        if (graph.isEnabled()) {
-            graph.add(RxJavaStageDistinct.INSTANCE);
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.distinct());
+        if (target.graph.isEnabled()) {
+            target.graph.add(RxJavaStageDistinct.INSTANCE);
         }
-        return this;
+        return target;
     }
 
     @Override
     public ProcessorBuilder<T, R> limit(long maxSize) {
-        this.transformers.add(current -> current.take(maxSize));
-        if (graph.isEnabled()) {
-            graph.add((Stage.Limit)() -> maxSize);
+        if (maxSize < 0L) {
+            throw new IllegalArgumentException("maxSize >= 0L required but it was " + maxSize);
         }
-        return this;
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.take(maxSize));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.Limit)() -> maxSize);
+        }
+        return target;
     }
 
     @Override
     public ProcessorBuilder<T, R> skip(long n) {
-        this.transformers.add(current -> current.skip(n));
-        if (graph.isEnabled()) {
-            graph.add((Stage.Skip)() -> n);
+        if (n < 0L) {
+            throw new IllegalArgumentException("maxSize >= 0L required but it was " + n);
         }
-        return this;
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.skip(n));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.Skip)() -> n);
+        }
+        return target;
     }
 
     @SuppressWarnings("unchecked")
     @Override
     public ProcessorBuilder<T, R> takeWhile(Predicate<? super R> predicate) {
         Objects.requireNonNull(predicate, "predicate is null");
-        this.transformers.add(current -> current.takeWhile(v -> predicate.test((R)v)));
-        if (graph.isEnabled()) {
-            graph.add((Stage.TakeWhile)() -> predicate);
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.takeWhile(v -> predicate.test((R)v)));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.TakeWhile)() -> predicate);
         }
-        return this;
+        return target;
     }
 
     @SuppressWarnings("unchecked")
     @Override
     public ProcessorBuilder<T, R> dropWhile(Predicate<? super R> predicate) {
         Objects.requireNonNull(predicate, "predicate is null");
-        this.transformers.add(current -> current.skipWhile(v -> predicate.test((R)v)));
-        if (graph.isEnabled()) {
-            graph.add((Stage.DropWhile)() -> predicate);
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.skipWhile(v -> predicate.test((R)v)));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.DropWhile)() -> predicate);
         }
-        return this;
+        return target;
     }
 
     @SuppressWarnings("unchecked")
     @Override
     public ProcessorBuilder<T, R> peek(Consumer<? super R> consumer) {
         Objects.requireNonNull(consumer, "consumer is null");
-        this.transformers.add(current -> current.doOnNext(v -> consumer.accept((R)v)));
-        if (graph.isEnabled()) {
-            graph.add((Stage.Peek)() -> consumer);
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.doOnNext(v -> consumer.accept((R)v)));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.Peek)() -> consumer);
         }
-        return this;
+        return target;
     }
 
     @Override
     public ProcessorBuilder<T, R> onError(Consumer<Throwable> errorHandler) {
         Objects.requireNonNull(errorHandler, "errorHandler is null");
-        this.transformers.add(current -> current.doOnError(v -> errorHandler.accept(v)));
-        if (graph.isEnabled()) {
-            graph.add((Stage.OnError)() -> errorHandler);
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.doOnError(v -> errorHandler.accept(v)));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.OnError)() -> errorHandler);
         }
-        return this;
+        return target;
     }
 
     @Override
     public ProcessorBuilder<T, R> onTerminate(Runnable action) {
         Objects.requireNonNull(action, "action is null");
-        this.transformers.add(current -> new FlowableDoOnTerminateAndCancel<>(current, action));
-        if (graph.isEnabled()) {
-            graph.add((Stage.OnTerminate)() -> action);
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> new FlowableDoOnTerminateAndCancel<>(current, action));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.OnTerminate)() -> action);
         }
-        return this;
+        return target;
     }
 
     @Override
     public ProcessorBuilder<T, R> onComplete(Runnable action) {
         Objects.requireNonNull(action, "action is null");
-        this.transformers.add(current -> current.doOnComplete(() -> action.run()));
-        if (graph.isEnabled()) {
-            graph.add((Stage.OnComplete)() -> action);
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.doOnComplete(() -> action.run()));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.OnComplete)() -> action);
         }
-        return this;
+        return target;
     }
 
     @SuppressWarnings("unchecked")
     @Override
     public SubscriberBuilder<T, Void> forEach(Consumer<? super R> action) {
         Objects.requireNonNull(action, "action is null");
-        if (graph.isEnabled()) {
-            // FIXME there is no Stage.ForEach
-        }
-        return new RxJavaSubscriberForProcessorBuilder<>(transformers, 
+        RxJavaSubscriberForProcessorBuilder<T, Object, Void> result = new RxJavaSubscriberForProcessorBuilder<>(transformers, 
                 current -> current.doOnNext(v -> action.accept((R)v))
                                   .ignoreElements().toCompletionStage(null));
+        
+        if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
+
+            // TODO there is no Stage.ForEach
+            Collector<R, Object, Object> collector = Collector.of(
+                    () -> null, 
+                    (a, b) -> action.accept(b), 
+                    (a, b) ->  { throw new UnsupportedOperationException(); },
+                    (a) -> null
+                    ); 
+            result.graph.add((Stage.Collect)() -> collector);
+        }
+
+        return result;
     }
 
     @Override
     public SubscriberBuilder<T, Void> ignore() {
-        if (graph.isEnabled()) {
-            // FIXME there is no Stage.Ignore
-        }
-        return new RxJavaSubscriberForProcessorBuilder<>(transformers, 
+        RxJavaSubscriberForProcessorBuilder<T, Object, Void> result = new RxJavaSubscriberForProcessorBuilder<>(transformers, 
                 current -> current.ignoreElements().toCompletionStage(null));
+        if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
+
+            // TODO there is no Stage.Ignore
+            Collector<T, Object, Object> collector = Collector.of(
+                    () -> null, 
+                    (a, b) -> { }, 
+                    (a, b) ->  { throw new UnsupportedOperationException(); },
+                    (a) -> null
+                    ); 
+            result.graph.add((Stage.Collect)() -> collector);
+        }
+        return result;
     }
 
     @Override
@@ -273,24 +330,59 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
     public SubscriberBuilder<T, R> reduce(R identity,
             BinaryOperator<R> accumulator) {
         Objects.requireNonNull(accumulator, "accumulator is null");
-        if (graph.isEnabled()) {
-            // FIXME there is no Stage.Reduce
-        }
-        return new RxJavaSubscriberForProcessorBuilder<>(transformers, 
+        RxJavaSubscriberForProcessorBuilder<T, Object, R> result = new RxJavaSubscriberForProcessorBuilder<>(transformers, 
                 current -> current.reduce(identity, (a, b) -> accumulator.apply(a, (R)b))
                                   .toCompletionStage());
+        if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
+
+            // TODO there is no Stage.Reduce
+            Collector<R, AtomicReference<R>, R> collector = Collector.of(
+                    () -> new AtomicReference<>(identity), 
+                    (a, b) -> { a.lazySet(accumulator.apply(a.get(), b)); }, 
+                    (a, b) ->  { throw new UnsupportedOperationException(); },
+                    (a) -> a.get()
+                    ); 
+            result.graph.add((Stage.Collect)() -> collector);
+        }
+        return result;
     }
 
     @Override
     public SubscriberBuilder<T, Optional<R>> reduce(
             BinaryOperator<R> accumulator) {
         Objects.requireNonNull(accumulator, "accumulator is null");
-        if (graph.isEnabled()) {
-            // FIXME there is no Stage.Reduce
-        }
-        return new RxJavaSubscriberForProcessorBuilder<T, R, Optional<R>>(transformers, 
+        RxJavaSubscriberForProcessorBuilder<T, R, Optional<R>> result = new RxJavaSubscriberForProcessorBuilder<>(transformers, 
                 current -> current.reduce((a, b) -> accumulator.apply(a, b)).map(Optional::of)
                                   .toCompletionStage(Optional.empty()));
+        if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
+
+            // TODO there is no Stage.Reduce
+            @SuppressWarnings("unchecked")
+            Collector<R, AtomicReference<Object>, Optional<R>> collector = Collector.of(
+                    () -> new AtomicReference<>(EMPTY_REDUCE), 
+                    (a, b) -> { 
+                        Object o = a.get();
+                        if (o == EMPTY_REDUCE) {
+                            a.lazySet(b);
+                        } else {
+                            a.lazySet(accumulator.apply((R)a.get(), b));
+                        }
+                    }, 
+                    (a, b) ->  { throw new UnsupportedOperationException(); },
+                    (a) -> {
+                        Object o = a.get();
+                        if (o == null || o == EMPTY_REDUCE) {
+                            return Optional.empty();
+                        }
+                        return Optional.of((R)o);
+                    }
+                    ); 
+
+            result.graph.add((Stage.Collect)() -> collector);
+        }
+        return result;
     }
 
     @Override
@@ -327,12 +419,20 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
             BiConsumer<S, ? super R> accumulator) {
         Objects.requireNonNull(supplier, "predicate is null");
         Objects.requireNonNull(accumulator, "predicate is null");
-        if (graph.isEnabled()) {
-            // FIXME there is no Stage.Collect with supplier+lambda
-        }
-        return new RxJavaSubscriberForProcessorBuilder<>(transformers, 
+        RxJavaSubscriberForProcessorBuilder<T, Object, S> result = new RxJavaSubscriberForProcessorBuilder<>(transformers, 
                 current -> current.collect(() -> supplier.get(), (a, b) -> accumulator.accept(a, (R)b))
                            .toCompletionStage());
+
+        if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
+            Collector<R, S, S> collector = Collector.of(
+                    supplier, 
+                    (BiConsumer<S, R>)accumulator, 
+                    (a, b) ->  { throw new UnsupportedOperationException(); }, 
+                    Collector.Characteristics.IDENTITY_FINISH); 
+            result.graph.add((Stage.Collect)() -> collector);
+        }
+        return result;
     }
 
     @Override
@@ -341,6 +441,7 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
                 new RxJavaSubscriberForProcessorBuilder<>(transformers, 
                 current -> current.toList().toCompletionStage());
         if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
             // TODO there is no Stage.ToList
             Collector<?, ?, ?> coll = Collectors.toList();
             result.graph.add((Stage.Collect)() -> coll);
@@ -352,17 +453,18 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
     public ProcessorBuilder<T, R> onErrorResume(
             Function<Throwable, ? extends R> errorHandler) {
         Objects.requireNonNull(errorHandler, "predicate is null");
-        this.transformers.add(current -> current.onErrorResumeNext(e -> {
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.onErrorResumeNext(e -> {
             try {
                 return Flowable.just(errorHandler.apply(e));
             } catch (Throwable ex) {
                 return Flowable.error(ex);
             }
         }));
-        if (graph.isEnabled()) {
-            graph.add((Stage.OnErrorResume)() -> errorHandler);
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.OnErrorResume)() -> errorHandler);
         }
-        return this;
+        return target;
     }
 
     @Override
@@ -370,7 +472,8 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
     public ProcessorBuilder<T, R> onErrorResumeWith(
             Function<Throwable, ? extends PublisherBuilder<? extends R>> errorHandler) {
         Objects.requireNonNull(errorHandler, "errorHandler is null");
-        this.transformers.add(current -> current.onErrorResumeNext(e -> {
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.onErrorResumeNext(e -> {
             PublisherBuilder<? extends R> pb;
             try {
                 pb = errorHandler.apply(e);
@@ -382,24 +485,25 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
             }
             return pb.buildRs();
         }));
-        if (graph.isEnabled()) {
-            graph.add((Stage.OnErrorResumeWith)() -> v -> RxJavaGraphCaptureEngine.capture(errorHandler.apply(v)));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.OnErrorResumeWith)() -> v -> RxJavaGraphCaptureEngine.capture(errorHandler.apply(v)));
         }
-        return this;
+        return target;
     }
 
     @Override
     public ProcessorBuilder<T, R> onErrorResumeWithRsPublisher(
             Function<Throwable, ? extends Publisher<? extends R>> errorHandler) {
         Objects.requireNonNull(errorHandler, "errorHandler is null");
-        this.transformers.add(current -> current.onErrorResumeNext(e -> {
+        RxJavaProcessorBuilder<T, R> target = getTarget();
+        target.transformers.add(current -> current.onErrorResumeNext(e -> {
             try {
                 return errorHandler.apply(e);
             } catch (Throwable ex) {
                 return Flowable.error(ex);
             }
         }));
-        graph.add((Stage.OnErrorResumeWith)() -> v -> {
+        target.graph.add((Stage.OnErrorResumeWith)() -> v -> {
             Publisher<?> p;
             try {
                 p = errorHandler.apply(v);
@@ -411,7 +515,7 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
             Collection<Stage> coll = Collections.singletonList(ps);
             return (Graph)() -> coll;
         });
-        return this;
+        return target;
     }
 
     @Override
@@ -430,6 +534,7 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
             return cs.getCompletion();
         });
         if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
             result.graph.add((Stage.SubscriberStage)() -> subscriber);
         }
         return result;
@@ -448,9 +553,14 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
             return (CompletionStage<S>)cs.getCompletion();
         });
         if (result.graph.isEnabled()) {
-            // TODO is this supposed to work like this?
-            Subscriber<?> s = subscriber.build();
-            result.graph.add((Stage.SubscriberStage)() -> s);
+            result.graph.addAll(graph);
+            if (subscriber instanceof ToGraphable) {
+                result.graph.addAll(((ToGraphable)subscriber).toGraph());
+            } else {
+                // TODO is this supposed to work like this?
+                Subscriber<?> s = subscriber.build();
+                result.graph.add((Stage.SubscriberStage)() -> s);
+            }
         }
         return result;
     }
@@ -460,7 +570,8 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
     public <S> ProcessorBuilder<T, S> via(
             ProcessorBuilder<? super R, ? extends S> processor) {
         Objects.requireNonNull(processor, "processor is null");
-        this.transformers.add(current -> {
+        RxJavaProcessorBuilder<T, S> target = getTarget();
+        target.transformers.add(current -> {
             Flowable c = current;
             if (processor instanceof RxJavaProcessorBuilder) {
                 RxJavaProcessorBuilder<R, S> rx = (RxJavaProcessorBuilder<R, S>)processor;
@@ -472,12 +583,16 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
             }
             return current;
         });
-        if (graph.isEnabled()) {
+        if (target.graph.isEnabled()) {
             // TODO is this supposed to work like this?
-            Processor<?, ?> p1 = processor.buildRs();
-            graph.add((Stage.ProcessorStage)() -> p1);
+            if (processor instanceof ToGraphable) {
+                target.graph.addAll(((ToGraphable)processor).toGraph());
+            } else {
+                Processor<?, ?> p1 = processor.buildRs();
+                target.graph.add((Stage.ProcessorStage)() -> p1);
+            }
         }
-        return (ProcessorBuilder<T, S>)this;
+        return target;
     }
 
     @Override
@@ -485,15 +600,16 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
     public <S> ProcessorBuilder<T, S> via(
             Processor<? super R, ? extends S> processor) {
         Objects.requireNonNull(processor, "processor is null");
-        this.transformers.add(current -> {
+        RxJavaProcessorBuilder<T, S> target = getTarget();
+        target.transformers.add(current -> {
             Flowable c = current;
             c.subscribe(processor);
             return Flowable.fromPublisher(processor);
         });
-        if (graph.isEnabled()) {
-            graph.add((Stage.ProcessorStage)() -> processor);
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.ProcessorStage)() -> processor);
         }
-        return (ProcessorBuilder<T, S>)this;
+        return target;
     }
 
     @SuppressWarnings("unchecked")
@@ -516,4 +632,7 @@ public final class RxJavaProcessorBuilder<T, R> implements ProcessorBuilder<T, R
     public Graph toGraph() {
         return graph;
     }
+
+    /** Empty token for the reduce(BinaryOperator) variant. */
+    static final Object EMPTY_REDUCE = new Object();
 }

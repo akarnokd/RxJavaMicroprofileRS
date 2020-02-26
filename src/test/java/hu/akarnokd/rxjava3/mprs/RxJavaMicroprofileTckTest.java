@@ -45,17 +45,19 @@ public class RxJavaMicroprofileTckTest
 
     @Override
     protected boolean isEnabled(Object test) {
-        return test.toString().contains("PublisherBuilderVerification");
-//        return true;
+//        return test.toString().contains("ProcessorBuilderVerification");
+        return true;
     }
     
     @BeforeSuite(alwaysRun = true)
     public void before() {
         RxJavaMicroprofilePlugins.enableBuildGraph();
+        RxJavaMicroprofilePlugins.enableImmutableBuilders();
     }
 
     @AfterSuite(alwaysRun = true)
     public void after() {
         RxJavaMicroprofilePlugins.disableBuildGraph();
+        RxJavaMicroprofilePlugins.disableImmutableBuilders();
     }
 }

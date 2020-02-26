@@ -48,17 +48,30 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
         this.graph = RxJavaMicroprofilePlugins.buildGraph() ? new RxJavaListGraphBuilder() : RxJavaNoopGraphBuilder.INSTANCE;
     }
 
+    @SuppressWarnings("unchecked")
+    <U> RxJavaPublisherBuilder<U> getTarget() {
+        if (RxJavaMicroprofilePlugins.immutableBuilders()) {
+            RxJavaPublisherBuilder<T> newTarget = new RxJavaPublisherBuilder<>(current);
+            if (newTarget.graph.isEnabled()) {
+                newTarget.graph.addAll(graph);
+            }
+            return (RxJavaPublisherBuilder<U>)newTarget;
+        }
+        return (RxJavaPublisherBuilder<U>)this;
+    }
 
     @Override
     @SuppressWarnings({ "unchecked", "rawtypes" })
     public <R> PublisherBuilder<R> map(
             Function<? super T, ? extends R> mapper) {
         Objects.requireNonNull(mapper, "mapper is null");
-        current = (Flowable)current.map(v -> mapper.apply(v));
-        if (graph.isEnabled()) {
-            graph.add((Stage.Map)() -> mapper);
+
+        RxJavaPublisherBuilder<R> target = getTarget();
+        target.current = (Flowable)current.map(v -> mapper.apply(v));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.Map)() -> mapper);
         }
-        return (PublisherBuilder<R>)this;
+        return target;
     }
 
     @Override
@@ -66,19 +79,21 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
     public <S> PublisherBuilder<S> flatMap(
             Function<? super T, ? extends PublisherBuilder<? extends S>> mapper) {
         Objects.requireNonNull(mapper, "mapper is null");
-        current = current.concatMap(v -> {
+
+        RxJavaPublisherBuilder<S> target = getTarget();
+        target.current = current.concatMap(v -> {
             PublisherBuilder<? extends S> pb = mapper.apply(v);
             if (pb instanceof RxJavaPublisherBuilder) {
                 return new RxJavaInnerNullGuard<>(((RxJavaPublisherBuilder)pb).current);
             }
             return new RxJavaInnerNullGuard<>(pb.buildRs());
         });
-        if (graph.isEnabled()) {
-            graph.add((Stage.FlatMap)() -> v -> 
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.FlatMap)() -> v -> 
                 RxJavaGraphCaptureEngine.capture(mapper.apply((T)v))
             );
         }
-        return (PublisherBuilder<S>)this;
+        return target;
     }
 
     @Override
@@ -86,16 +101,17 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
     public <S> PublisherBuilder<S> flatMapRsPublisher(
             Function<? super T, ? extends Publisher<? extends S>> mapper) {
         Objects.requireNonNull(mapper, "mapper is null");
-        current = (Flowable)current.concatMap(v -> mapper.apply(v));
-        if (graph.isEnabled()) {
-            graph.add((Stage.FlatMap)() -> v -> {
+        RxJavaPublisherBuilder<S> target = getTarget();
+        target.current = current.concatMap(v -> mapper.apply(v));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.FlatMap)() -> v -> {
                 Publisher p = mapper.apply((T)v); // FIXME the RxJavaInnerNullGuard makes one test fail
                 Stage.PublisherStage ps = () -> p;
                 Collection<Stage> coll = Collections.singletonList(ps);
                 return (Graph)() -> coll;
             });
         }
-        return (PublisherBuilder<S>)this;
+        return target;
     }
 
     @Override
@@ -103,11 +119,12 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
     public <S> PublisherBuilder<S> flatMapCompletionStage(
             Function<? super T, ? extends CompletionStage<? extends S>> mapper) {
         Objects.requireNonNull(mapper, "mapper is null");
-        current = (Flowable)current.concatMapSingle(v -> Single.fromCompletionStage((CompletionStage<S>)mapper.apply(v)));
-        if (graph.isEnabled()) {
-            graph.add((Stage.FlatMapCompletionStage)() -> (Function)mapper);
+        RxJavaPublisherBuilder<S> target = getTarget();
+        target.current = current.concatMapSingle(v -> Single.fromCompletionStage((CompletionStage<S>)mapper.apply(v)));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.FlatMapCompletionStage)() -> (Function)mapper);
         }
-        return (PublisherBuilder<S>)this;
+        return target;
     }
 
     @Override
@@ -115,108 +132,119 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
     public <S> PublisherBuilder<S> flatMapIterable(
             Function<? super T, ? extends Iterable<? extends S>> mapper) {
         Objects.requireNonNull(mapper, "mapper is null");
-        current = (Flowable)current.concatMapIterable(v -> mapper.apply(v));
-        if (graph.isEnabled()) {
-            graph.add((Stage.FlatMapIterable)() -> (Function)mapper);
+        RxJavaPublisherBuilder<S> target = getTarget();
+        target.current = current.concatMapIterable(v -> mapper.apply(v));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.FlatMapIterable)() -> (Function)mapper);
         }
-        return (PublisherBuilder<S>)this;
+        return target;
     }
 
     @Override
     public PublisherBuilder<T> filter(Predicate<? super T> predicate) {
         Objects.requireNonNull(predicate, "predicate is null");
-        current = current.filter(v -> predicate.test(v));
-        if (graph.isEnabled()) {
-            graph.add((Stage.Filter)() -> predicate);
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = target.current.filter(v -> predicate.test(v));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.Filter)() -> predicate);
         }
-        return this;
+        return target;
     }
 
     @Override
     public PublisherBuilder<T> distinct() {
-        current = current.distinct();
-        if (graph.isEnabled()) {
-            graph.add(RxJavaStageDistinct.INSTANCE);
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = current.distinct();
+        if (target.graph.isEnabled()) {
+            target.graph.add(RxJavaStageDistinct.INSTANCE);
         }
-        return this;
+        return target;
     }
 
     @Override
     public PublisherBuilder<T> limit(long maxSize) {
-        current = current.take(maxSize);
-        if (graph.isEnabled()) {
-            graph.add((Stage.Limit)() -> maxSize);
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = current.take(maxSize);
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.Limit)() -> maxSize);
         }
-        return this;
+        return target;
     }
 
     @Override
     public PublisherBuilder<T> skip(long n) {
-        current = current.skip(n);
-        if (graph.isEnabled()) {
-            graph.add((Stage.Skip)() -> n);
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = current.skip(n);
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.Skip)() -> n);
         }
-        return this;
+        return target;
     }
 
     @Override
     public PublisherBuilder<T> takeWhile(Predicate<? super T> predicate) {
         Objects.requireNonNull(predicate, "predicate is null");
-        current = current.takeWhile(v -> predicate.test(v));
-        if (graph.isEnabled()) {
-            graph.add((Stage.TakeWhile)() -> predicate);
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = current.takeWhile(v -> predicate.test(v));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.TakeWhile)() -> predicate);
         }
-        return this;
+        return target;
     }
 
     @Override
     public PublisherBuilder<T> dropWhile(Predicate<? super T> predicate) {
         Objects.requireNonNull(predicate, "predicate is null");
-        current = current.skipWhile(v -> predicate.test(v));
-        if (graph.isEnabled()) {
-            graph.add((Stage.DropWhile)() -> predicate);
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = current.skipWhile(v -> predicate.test(v));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.DropWhile)() -> predicate);
         }
-        return this;
+        return target;
     }
 
     @Override
     public PublisherBuilder<T> peek(Consumer<? super T> consumer) {
         Objects.requireNonNull(consumer, "consumer is null");
-        current = current.doOnNext(v -> consumer.accept(v));
-        if (graph.isEnabled()) {
-            graph.add((Stage.Peek)() -> consumer);
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = current.doOnNext(v -> consumer.accept(v));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.Peek)() -> consumer);
         }
-        return this;
+        return target;
     }
 
     @Override
     public PublisherBuilder<T> onError(Consumer<Throwable> errorHandler) {
         Objects.requireNonNull(errorHandler, "errorHandler is null");
-        current = current.doOnError(v -> errorHandler.accept(v));
-        if (graph.isEnabled()) {
-            graph.add((Stage.OnError)() -> errorHandler);
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = current.doOnError(v -> errorHandler.accept(v));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.OnError)() -> errorHandler);
         }
-        return this;
+        return target;
     }
 
     @Override
     public PublisherBuilder<T> onTerminate(Runnable action) {
         Objects.requireNonNull(action, "action is null");
-        current = new FlowableDoOnTerminateAndCancel<>(current, action);
-        if (graph.isEnabled()) {
-            graph.add((Stage.OnTerminate)() -> action);
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = new FlowableDoOnTerminateAndCancel<>(current, action);
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.OnTerminate)() -> action);
         }
-        return this;
+        return target;
     }
 
     @Override
     public PublisherBuilder<T> onComplete(Runnable action) {
         Objects.requireNonNull(action, "action is null");
-        current = current.doOnComplete(() -> action.run());
-        if (graph.isEnabled()) {
-            graph.add((Stage.OnComplete)() -> action);
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = current.doOnComplete(() -> action.run());
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.OnComplete)() -> action);
         }
-        return this;
+        return target;
     }
 
     @Override
@@ -404,18 +432,19 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
     @Override
     public PublisherBuilder<T> onErrorResume(
             Function<Throwable, ? extends T> errorHandler) {
+        RxJavaPublisherBuilder<T> target = getTarget();
         Objects.requireNonNull(errorHandler, "errorHandler is null");
-        current = current.onErrorResumeNext(e -> {
+        target.current = current.onErrorResumeNext(e -> {
             try {
                 return Flowable.just(errorHandler.apply(e));
             } catch (Throwable ex) {
                 return Flowable.error(ex);
             }
         });
-        if (graph.isEnabled()) {
-            graph.add((Stage.OnErrorResume)() -> errorHandler);
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.OnErrorResume)() -> errorHandler);
         }
-        return this;
+        return target;
     }
 
     @SuppressWarnings({ "unchecked", "rawtypes" })
@@ -423,7 +452,8 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
     public PublisherBuilder<T> onErrorResumeWith(
             Function<Throwable, ? extends PublisherBuilder<? extends T>> errorHandler) {
         Objects.requireNonNull(errorHandler, "errorHandler is null");
-        current = current.onErrorResumeNext(e -> {
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = current.onErrorResumeNext(e -> {
             PublisherBuilder<? extends T> pb;
             try {
                 pb = errorHandler.apply(e);
@@ -435,25 +465,26 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
             }
             return pb.buildRs();
         });
-        if (graph.isEnabled()) {
-            graph.add((Stage.OnErrorResumeWith)() -> v -> RxJavaGraphCaptureEngine.capture(errorHandler.apply(v)));
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.OnErrorResumeWith)() -> v -> RxJavaGraphCaptureEngine.capture(errorHandler.apply(v)));
         }
-        return this;
+        return target;
     }
 
     @Override
     public PublisherBuilder<T> onErrorResumeWithRsPublisher(
             Function<Throwable, ? extends Publisher<? extends T>> errorHandler) {
         Objects.requireNonNull(errorHandler, "errorHandler is null");
-        current = current.onErrorResumeNext(e -> {
+        RxJavaPublisherBuilder<T> target = getTarget();
+        target.current = current.onErrorResumeNext(e -> {
             try {
                 return errorHandler.apply(e);
             } catch (Throwable ex) {
                 return Flowable.error(ex);
             }
         });
-        if (graph.isEnabled()) {
-            graph.add((Stage.OnErrorResumeWith)() -> v -> {
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.OnErrorResumeWith)() -> v -> {
                 Publisher<?> p;
                 try {
                     p = errorHandler.apply(v);
@@ -466,16 +497,24 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
                 return (Graph)() -> coll;
             });
         }
-        return this;
+        return target;
     }
 
     @Override
+    @SuppressWarnings({ "rawtypes", "unchecked" })
     public CompletionRunner<Void> to(Subscriber<? super T> subscriber) {
         Objects.requireNonNull(subscriber, "subscriber is null");
+        RxJavaCompletionRunnerSubscriber result;
         if (subscriber instanceof FlowableSubscriber) {
-            return new RxJavaCompletionRunnerFlowableSubscriber<>(current, subscriber);
+            result = new RxJavaCompletionRunnerFlowableSubscriber<>(current, subscriber);
+        } else {
+            result = new RxJavaCompletionRunnerSubscriber<>(current, subscriber);
         }
-        return new RxJavaCompletionRunnerSubscriber<>(current, subscriber);
+        if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
+            result.graph.add((Stage.SubscriberStage)() -> subscriber);
+        }
+        return result;
     }
 
     @SuppressWarnings("unchecked")
@@ -506,26 +545,28 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
     public <R> PublisherBuilder<R> via(
             ProcessorBuilder<? super T, ? extends R> processor) {
         Objects.requireNonNull(processor, "processor is null");
+        RxJavaPublisherBuilder<R> target = getTarget();
         Flowable<T> c = current;
-        Processor<? super T, ? extends R> p;
         if (processor instanceof RxJavaProcessorBuilder) {
             RxJavaProcessorBuilder<T, R> rx = (RxJavaProcessorBuilder<T, R>)processor;
-            current = rx.transform(current);
+            target.current = rx.transform(current);
         } else {
-            p = processor.buildRs();
-            c.subscribe(p);
-            current = (Flowable)Flowable.fromPublisher(p);
+            target.current = (Flowable)Flowable.defer(() -> {
+                Processor<? super T, ? extends R> p = processor.buildRs();
+                c.subscribe(p);
+                return Flowable.fromPublisher(p);
+            });
         }
-        if (graph.isEnabled()) {
+        if (target.graph.isEnabled()) {
             // TODO is this supposed to work like this?
             if (processor instanceof ToGraphable) {
-                graph.addAll(((ToGraphable)processor).toGraph());
+                target.graph.addAll(((ToGraphable)processor).toGraph());
             } else {
                 Processor<?, ?> p1 = processor.buildRs();
-                graph.add((Stage.ProcessorStage)() -> p1);
+                target.graph.add((Stage.ProcessorStage)() -> p1);
             }
         }
-        return (PublisherBuilder<R>)this;
+        return target;
     }
 
     @Override
@@ -533,13 +574,14 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
     public <R> PublisherBuilder<R> via(
             Processor<? super T, ? extends R> processor) {
         Objects.requireNonNull(processor, "processor is null");
+        RxJavaPublisherBuilder<R> target = getTarget();
         Flowable<T> c = current;
         c.subscribe(processor);
-        current = (Flowable)Flowable.fromPublisher(processor);
-        if (graph.isEnabled()) {
-            graph.add((Stage.ProcessorStage)() -> processor);
+        target.current = (Flowable)Flowable.fromPublisher(processor);
+        if (target.graph.isEnabled()) {
+            target.graph.add((Stage.ProcessorStage)() -> processor);
         }
-        return (PublisherBuilder<R>)this;
+        return target;
     }
 
     @Override
@@ -560,5 +602,6 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
         return graph;
     }
 
+    /** Empty token for the reduce(BinaryOperator) variant. */
     static final Object EMPTY_REDUCE = new Object();
 }
