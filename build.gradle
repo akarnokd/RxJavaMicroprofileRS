@@ -106,9 +106,11 @@ jacocoTestReport {
         xml.enabled = true
         html.enabled = true
     }
+    executionData testng
 }
 
 jacocoTestReport.dependsOn test
+jacocoTestReport.dependsOn testng
 
 apply plugin: "com.github.hierynomus.license"
 
