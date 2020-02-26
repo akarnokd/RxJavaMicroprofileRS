@@ -18,6 +18,7 @@ package hu.akarnokd.rxjava3.mprs;
 
 import java.util.*;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.*;
 import java.util.stream.*;
 
@@ -88,7 +89,7 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
         current = (Flowable)current.concatMap(v -> mapper.apply(v));
         if (graph.isEnabled()) {
             graph.add((Stage.FlatMap)() -> v -> {
-                Publisher p = new RxJavaInnerNullGuard<>(mapper.apply((T)v));
+                Publisher p = mapper.apply((T)v); // FIXME the RxJavaInnerNullGuard makes one test fail
                 Stage.PublisherStage ps = () -> p;
                 Collection<Stage> coll = Collections.singletonList(ps);
                 return (Graph)() -> coll;
@@ -221,21 +222,43 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
     @Override
     public CompletionRunner<Void> forEach(Consumer<? super T> action) {
         Objects.requireNonNull(action, "action is null");
-        if (graph.isEnabled()) {
-            // FIXME there is no Stage.ForEach
-        }
-        return new RxJavaCompletionRunner<>(
+        RxJavaCompletionRunner<Completable, Void> result = new RxJavaCompletionRunner<>(
                 current.doOnNext(v -> action.accept(v)).ignoreElements(),
                 c -> c.toCompletionStage(null));
+
+        if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
+
+            // TODO there is no Stage.ForEach
+            Collector<T, Object, Object> collector = Collector.of(
+                    () -> null, 
+                    (a, b) -> action.accept(b), 
+                    (a, b) ->  { throw new UnsupportedOperationException(); },
+                    (a) -> null
+                    ); 
+            result.graph.add((Stage.Collect)() -> collector);
+        }
+        return result;
     }
 
     @Override
     public CompletionRunner<Void> ignore() {
-        if (graph.isEnabled()) {
-            // FIXME there is no Stage.Ignore
-        }
-        return new RxJavaCompletionRunner<>(current.ignoreElements(), 
+        RxJavaCompletionRunner<@NonNull Completable, Void> result = new RxJavaCompletionRunner<>(current.ignoreElements(), 
                 c -> c.toCompletionStage(null));
+        if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
+
+            // TODO there is no Stage.Ignore
+            Collector<T, Object, Object> collector = Collector.of(
+                    () -> null, 
+                    (a, b) -> { }, 
+                    (a, b) ->  { throw new UnsupportedOperationException(); },
+                    (a) -> null
+                    ); 
+            result.graph.add((Stage.Collect)() -> collector);
+        }
+        
+        return result;
     }
 
     @Override
@@ -253,24 +276,62 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
     public CompletionRunner<T> reduce(T identity,
             BinaryOperator<T> accumulator) {
         Objects.requireNonNull(accumulator, "accumulator is null");
-        if (graph.isEnabled()) {
-            // FIXME there is no Stage.Reduce
+
+        RxJavaCompletionRunner<Maybe<T>, T> result = new RxJavaCompletionRunner<>(
+                new FlowableReduceNullAllowed<>(current, identity, accumulator),
+                s -> s.toCompletionStage(null));
+        
+        if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
+
+            // TODO there is no Stage.Reduce
+            Collector<T, AtomicReference<T>, T> collector = Collector.of(
+                    () -> new AtomicReference<>(identity), 
+                    (a, b) -> { a.lazySet(accumulator.apply(a.get(), b)); }, 
+                    (a, b) ->  { throw new UnsupportedOperationException(); },
+                    (a) -> a.get()
+                    ); 
+            result.graph.add((Stage.Collect)() -> collector);
         }
-        return new RxJavaCompletionRunner<>(
-                current.reduce(identity, (a, b) -> accumulator.apply(a, b)),
-                s -> s.toCompletionStage());
+        
+        return result;
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public CompletionRunner<Optional<T>> reduce(BinaryOperator<T> accumulator) {
         Objects.requireNonNull(accumulator, "accumulator is null");
-        if (graph.isEnabled()) {
-            // FIXME there is no Stage.Reduce
-        }
-        return new RxJavaCompletionRunner<>(
+        RxJavaCompletionRunner<Maybe<Optional<T>>, Optional<T>> result = new RxJavaCompletionRunner<>(
                 current.reduce((a, b) -> accumulator.apply(a, b))
                     .map(Optional::of),
                 m -> m.toCompletionStage(Optional.empty()));
+        if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
+
+            // TODO there is no Stage.Reduce
+            Collector<T, AtomicReference<Object>, Optional<T>> collector = Collector.of(
+                    () -> new AtomicReference<>(EMPTY_REDUCE), 
+                    (a, b) -> { 
+                        Object o = a.get();
+                        if (o == EMPTY_REDUCE) {
+                            a.lazySet(b);
+                        } else {
+                            a.lazySet(accumulator.apply((T)a.get(), b));
+                        }
+                    }, 
+                    (a, b) ->  { throw new UnsupportedOperationException(); },
+                    (a) -> {
+                        Object o = a.get();
+                        if (o == null || o == EMPTY_REDUCE) {
+                            return Optional.empty();
+                        }
+                        return Optional.of((T)o);
+                    }
+                    ); 
+
+            result.graph.add((Stage.Collect)() -> collector);
+        }
+        return result;
     }
 
     @Override
@@ -279,6 +340,7 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
                 current.firstElement().map(Optional::of),
                 m -> m.toCompletionStage(Optional.empty()));
         if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
             result.graph.add(RxJavaStageFindFirst.INSTANCE);
         }
         return result;
@@ -294,6 +356,7 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
                 s -> s.toCompletionStage()
                 );
         if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
             result.graph.add((Stage.Collect)() -> collector);
         }
         return result;
@@ -304,28 +367,34 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
             BiConsumer<R, ? super T> accumulator) {
         Objects.requireNonNull(supplier, "supplier is null");
         Objects.requireNonNull(accumulator, "accumulator is null");
-        if (graph.isEnabled()) {
-            // FIXME there is no Stage.Collect with supplier+lambda
-        }
-        return new RxJavaCompletionRunner<>(
+
+        RxJavaCompletionRunner<Single<R>, R> result = new RxJavaCompletionRunner<>(
                 current.collect(() -> supplier.get(), (a, b) -> accumulator.accept(a, b)),
                 s -> s.toCompletionStage()
-                );
+        );
+
+        if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
+            @SuppressWarnings("unchecked")
+            Collector<T, R, R> collector = Collector.of(
+                    supplier, 
+                    (BiConsumer<R, T>)accumulator, 
+                    (a, b) ->  { throw new UnsupportedOperationException(); }, 
+                    Collector.Characteristics.IDENTITY_FINISH); 
+            result.graph.add((Stage.Collect)() -> collector);
+        }
+        return result;
     }
 
     @Override
     public CompletionRunner<List<T>> toList() {
-        if (graph.isEnabled()) {
-            // TODO there is no Stage.ToList
-            Collector<?, ?, ?> coll = Collectors.toList();
-            graph.add((Stage.Collect)() -> coll);
-        }
         RxJavaCompletionRunner<Single<List<T>>, List<T>> result = new RxJavaCompletionRunner<>(
                 current.toList(),
                 s -> s.toCompletionStage()
                 );
         
         if (result.graph.isEnabled()) {
+            result.graph.addAll(graph);
             Collector<?, ?, ?> coll = Collectors.toList();
             result.graph.add((Stage.Collect)() -> coll);
         }
@@ -420,9 +489,14 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
             return (CompletionStage<R>)cs.getCompletion();
         });
         if (result.graph.isEnabled()) {
-            // TODO is this supposed to work like this?
-            Subscriber<?> s = subscriber.build();
-            result.graph.add((Stage.SubscriberStage)() -> s);
+            result.graph.addAll(graph);
+            if (subscriber instanceof ToGraphable) {
+                result.graph.addAll(((ToGraphable)subscriber).toGraph());
+            } else {
+                // TODO is this supposed to work like this?
+                Subscriber<?> s = subscriber.build();
+                result.graph.add((Stage.SubscriberStage)() -> s);
+            }
         }
         return result;
     }
@@ -444,8 +518,12 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
         }
         if (graph.isEnabled()) {
             // TODO is this supposed to work like this?
-            Processor<?, ?> p1 = processor.buildRs();
-            graph.add((Stage.ProcessorStage)() -> p1);
+            if (processor instanceof ToGraphable) {
+                graph.addAll(((ToGraphable)processor).toGraph());
+            } else {
+                Processor<?, ?> p1 = processor.buildRs();
+                graph.add((Stage.ProcessorStage)() -> p1);
+            }
         }
         return (PublisherBuilder<R>)this;
     }
@@ -481,4 +559,6 @@ public final class RxJavaPublisherBuilder<T> implements PublisherBuilder<T>, ToG
     public Graph toGraph() {
         return graph;
     }
+
+    static final Object EMPTY_REDUCE = new Object();
 }

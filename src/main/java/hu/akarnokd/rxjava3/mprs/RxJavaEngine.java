@@ -129,7 +129,7 @@ public enum RxJavaEngine implements ReactiveStreamsEngine {
                 requireNullSource(result, stage);
                 Graph g1 = ((Stage.Concat)stage).getFirst();
                 Graph g2 = ((Stage.Concat)stage).getSecond();
-                result = Flowable.concat((Publisher)build(g1, Mode.PUBLISHER), (Publisher)build(g2, Mode.PUBLISHER));
+                result = new FlowableConcatCanceling<>((Publisher)build(g1, Mode.PUBLISHER), (Publisher)build(g2, Mode.PUBLISHER));
                 continue;
             }
             if (stage instanceof Stage.FromCompletionStage) {

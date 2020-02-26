@@ -29,11 +29,14 @@ import io.reactivex.rxjava3.processors.PublishProcessor;
 
 /**
  * Constructs RxJava-based PublisherBuilders.
+ * <p>
+ * @apiNote this has to be with a public constructor for the ServiceLoader to work
  */
-public enum RxJavaPublisherFactory implements ReactiveStreamsFactory {
+public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
 
-    INSTANCE;
-    
+    /** The (almost) singleton instance. */
+    public static final ReactiveStreamsFactory INSTANCE = new RxJavaPublisherFactory();
+
     @Override
     public <T> PublisherBuilder<T> fromPublisher(
             Publisher<? extends T> publisher) {
@@ -122,8 +125,11 @@ public enum RxJavaPublisherFactory implements ReactiveStreamsFactory {
             Subscriber<? extends T> subscriber) {
         Objects.requireNonNull(subscriber, "processor is null");
         // FIXME the signature is wrong, at least let it compile
-        // TODO graph specificiation?
-        return new RxJavaSubscriberBuilder<>((Subscriber<T>)subscriber);
+        RxJavaSubscriberBuilder<T> result = new RxJavaSubscriberBuilder<>((Subscriber<T>)subscriber);
+        if (result.graph.isEnabled()) {
+            result.graph.add((Stage.SubscriberStage)() -> subscriber);
+        }
+        return result;
     }
 
     @Override
@@ -200,7 +206,7 @@ public enum RxJavaPublisherFactory implements ReactiveStreamsFactory {
             source2 = Flowable.fromPublisher(b.buildRs());
         }
         RxJavaPublisherBuilder<T> result = new RxJavaPublisherBuilder<>(
-                Flowable.concat(source1, source2));
+                new FlowableConcatCanceling<>(source1, source2));
         
         if (result.graph.isEnabled()) {
             result.graph.add(new Stage.Concat() {
@@ -247,7 +253,25 @@ public enum RxJavaPublisherFactory implements ReactiveStreamsFactory {
     public <T, R> ProcessorBuilder<T, R> coupled(
             SubscriberBuilder<? super T, ?> subscriber,
             PublisherBuilder<? extends R> publisher) {
-        return coupled(subscriber.build(), publisher.buildRs());
+        RxJavaProcessorBuilder<T, R> result = coupledBuild(subscriber.build(), publisher.buildRs());
+        if (result.graph.isEnabled()) {
+            Graph subscriberGraph = RxJavaGraphCaptureEngine.capture(subscriber);
+            Graph publisherGraph = RxJavaGraphCaptureEngine.capture(publisher);
+            result.graph.add(new Stage.Coupled() {
+
+                @Override
+                public Graph getSubscriber() {
+                    return subscriberGraph;
+                }
+
+                @Override
+                public Graph getPublisher() {
+                    return publisherGraph;
+                }
+                
+            });
+        }
+        return result;
     }
 
     @Override
@@ -255,25 +279,8 @@ public enum RxJavaPublisherFactory implements ReactiveStreamsFactory {
             Subscriber<? super T> subscriber,
             Publisher<? extends R> publisher) {
         
-        BasicProcessor<T> inlet = new BasicProcessor<>();
-        PublishProcessor<Void> publisherActivity = PublishProcessor.create();
-        PublishProcessor<Void> subscriberActivity = PublishProcessor.create();
-        
-        inlet
-                .doOnComplete(() -> subscriberActivity.onComplete())
-                .doOnError(e -> subscriberActivity.onError(e))
-                .takeUntil(publisherActivity)
-                .doOnCancel(() -> subscriberActivity.onComplete())
-                .subscribe(subscriber);
-        
-        Flowable<? extends R> outlet = Flowable.fromPublisher(publisher)
-                .doOnComplete(() -> publisherActivity.onComplete())
-                .doOnError(e -> publisherActivity.onError(e))
-                .takeUntil(subscriberActivity)
-                .doOnCancel(() -> publisherActivity.onComplete())
-                ;
 
-        RxJavaProcessorBuilder<T, R> result = new RxJavaProcessorBuilder<>(new FlowableProcessorBridge<>(inlet, outlet));
+        RxJavaProcessorBuilder<T, R> result = coupledBuild(subscriber, publisher);
         if (result.graph.isEnabled()) {
             result.graph.add(new Stage.Coupled() {
 
@@ -294,4 +301,27 @@ public enum RxJavaPublisherFactory implements ReactiveStreamsFactory {
         return result;
     }
 
+    <T, R> RxJavaProcessorBuilder<T, R> coupledBuild(Subscriber<? super T> subscriber,
+            Publisher<? extends R> publisher) {
+        
+        BasicProcessor<T> inlet = new BasicProcessor<>();
+        PublishProcessor<Void> publisherActivity = PublishProcessor.create();
+        PublishProcessor<Void> subscriberActivity = PublishProcessor.create();
+        
+        inlet
+                .doOnComplete(() -> subscriberActivity.onComplete())
+                .doOnError(e -> subscriberActivity.onError(e))
+                .takeUntil(publisherActivity)
+                .doOnCancel(() -> subscriberActivity.onComplete())
+                .subscribe(subscriber);
+        
+        Flowable<? extends R> outlet = Flowable.fromPublisher(publisher)
+                .doOnComplete(() -> publisherActivity.onComplete())
+                .doOnError(e -> publisherActivity.onError(e))
+                .takeUntil(subscriberActivity)
+                .doOnCancel(() -> publisherActivity.onComplete())
+                ;
+
+        return new RxJavaProcessorBuilder<>(new FlowableProcessorBridge<>(inlet, outlet));
+    }
 }

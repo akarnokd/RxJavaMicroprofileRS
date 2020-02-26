@@ -16,6 +16,7 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
+import java.util.Objects;
 import java.util.function.*;
 import java.util.stream.Collector;
 
@@ -127,7 +128,7 @@ final class FlowableCollectCollectorDeferred<T, A, R> extends Single<R> {
                 collection = null;
                 R r;
                 try {
-                    r = finisher.apply(c);
+                    r = Objects.requireNonNull(finisher.apply(c), "The finisher returned a null value");
                 } catch (Throwable ex) {
                     downstream.onError(ex);
                     return;

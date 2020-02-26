@@ -92,7 +92,7 @@ implements Subscriber<T> {
             collection = null;
             R r;
             try {
-                r = finisher.apply(c);
+                r = finisher.apply(c); // null is allowed here for the completable's sake
             } catch (Throwable ex) {
                 completable.completeExceptionally(ex);
                 return;

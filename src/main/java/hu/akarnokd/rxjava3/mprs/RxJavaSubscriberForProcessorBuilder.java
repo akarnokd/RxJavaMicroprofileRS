@@ -50,20 +50,16 @@ final class RxJavaSubscriberForProcessorBuilder<T, U, R> implements SubscriberBu
             f = Flowable.fromPublisher(ft.apply(f));
         }
         CompletionStage st = toStage.apply(f);
-        return new RxJavaCompletionFlowableSubscriberStage<>(dp, st);
+        return CompletionSubscriber.of(dp, st);
     }
 
-    @SuppressWarnings({ "unchecked", "rawtypes" })
     @Override
     public CompletionSubscriber<T, R> build(ReactiveStreamsEngine engine) {
         if (engine instanceof RxJavaEngine) {
             return build();
         }
-        SubscriberWithCompletionStage<Object, Object> buildSubscriber = engine.buildSubscriber(graph);
-        if (buildSubscriber.getSubscriber() instanceof FlowableSubscriber) {
-            return new RxJavaCompletionFlowableSubscriberStage(buildSubscriber.getSubscriber(), buildSubscriber.getCompletion());
-        }
-        return new RxJavaCompletionSubscriberStage(buildSubscriber.getSubscriber(), buildSubscriber.getCompletion());
+        SubscriberWithCompletionStage<T, R> buildSubscriber = engine.buildSubscriber(graph);
+        return CompletionSubscriber.of(buildSubscriber.getSubscriber(), buildSubscriber.getCompletion());
     }
 
     @Override

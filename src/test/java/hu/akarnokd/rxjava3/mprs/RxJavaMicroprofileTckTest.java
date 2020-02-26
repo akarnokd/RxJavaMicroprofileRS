@@ -45,8 +45,8 @@ public class RxJavaMicroprofileTckTest
 
     @Override
     protected boolean isEnabled(Object test) {
-//        return test.toString().contains("ProcessorBuilderVerification");
-        return true;
+        return test.toString().contains("PublisherBuilderVerification");
+//        return true;
     }
     
     @BeforeSuite(alwaysRun = true)
