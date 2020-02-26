@@ -17,7 +17,7 @@
 package hu.akarnokd.rxjava3.mprs;
 
 import java.util.*;
-import java.util.concurrent.CompletionStage;
+import java.util.concurrent.*;
 import java.util.function.*;
 
 import org.eclipse.microprofile.reactive.streams.operators.*;
@@ -25,7 +25,6 @@ import org.eclipse.microprofile.reactive.streams.operators.spi.*;
 import org.reactivestreams.*;
 
 import io.reactivex.rxjava3.core.*;
-import io.reactivex.rxjava3.processors.PublishProcessor;
 
 /**
  * Constructs RxJava-based PublisherBuilders.
@@ -105,6 +104,11 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
     @Override
     public <T> ProcessorBuilder<T, T> builder() {
         RxJavaProcessorBuilder<T, T> result = new RxJavaProcessorBuilder<>();
+        /*
+        if (result.graph.isEnabled()) {
+            result.graph.add((Stage.ProcessorStage)() -> new DeferredProcessor<>());
+        }
+        */
         return result;
     }
 
@@ -249,11 +253,23 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
         return result;
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public <T, R> ProcessorBuilder<T, R> coupled(
             SubscriberBuilder<? super T, ?> subscriber,
             PublisherBuilder<? extends R> publisher) {
-        RxJavaProcessorBuilder<T, R> result = coupledBuild(subscriber.build(), publisher.buildRs());
+        Objects.requireNonNull(subscriber, "subscriber is null");
+        Objects.requireNonNull(publisher, "publisher is null");
+
+        RxJavaProcessorBuilder<T, R> result = new RxJavaProcessorBuilder<>();
+        
+        result.transformers.add(f -> {
+            @SuppressWarnings("rawtypes")
+            Processor p = coupledBuildProcessor(subscriber.build(), publisher.buildRs());
+            f.subscribe(p);
+            return p;
+        });
+                
         if (result.graph.isEnabled()) {
             Graph subscriberGraph = RxJavaGraphCaptureEngine.capture(subscriber);
             Graph publisherGraph = RxJavaGraphCaptureEngine.capture(publisher);
@@ -274,13 +290,21 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
         return result;
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public <T, R> ProcessorBuilder<T, R> coupled(
             Subscriber<? super T> subscriber,
             Publisher<? extends R> publisher) {
-        
+        Objects.requireNonNull(subscriber, "subscriber is null");
+        Objects.requireNonNull(publisher, "publisher is null");
 
-        RxJavaProcessorBuilder<T, R> result = coupledBuild(subscriber, publisher);
+        RxJavaProcessorBuilder<T, R> result = new RxJavaProcessorBuilder<>();
+        result.transformers.add(f -> {
+            @SuppressWarnings("rawtypes")
+            Processor p = coupledBuildProcessor(subscriber, publisher);
+            f.subscribe(p);
+            return p;
+        });
         if (result.graph.isEnabled()) {
             result.graph.add(new Stage.Coupled() {
 
@@ -301,27 +325,46 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
         return result;
     }
 
-    <T, R> RxJavaProcessorBuilder<T, R> coupledBuild(Subscriber<? super T> subscriber,
+    static <T, R> RxJavaProcessorBuilder<T, R> coupledBuild(Subscriber<? super T> subscriber,
+            Publisher<? extends R> publisher) {
+        return new RxJavaProcessorBuilder<>(coupledBuildProcessor(subscriber, publisher));
+    }
+    
+    static <T, R> Processor<T, R> coupledBuildProcessor(Subscriber<? super T> subscriber,
             Publisher<? extends R> publisher) {
         
         BasicProcessor<T> inlet = new BasicProcessor<>();
-        PublishProcessor<Void> publisherActivity = PublishProcessor.create();
-        PublishProcessor<Void> subscriberActivity = PublishProcessor.create();
+        CompletableFuture<Object> publisherActivity = new CompletableFuture<>();
+        CompletableFuture<Object> subscriberActivity = new CompletableFuture<>();
         
         inlet
-                .doOnComplete(() -> subscriberActivity.onComplete())
-                .doOnError(e -> subscriberActivity.onError(e))
-                .takeUntil(publisherActivity)
-                .doOnCancel(() -> subscriberActivity.onComplete())
+                .doOnComplete(() -> complete(subscriberActivity))
+                .doOnError(e -> fail(subscriberActivity, e))
+                .compose(f -> new FlowableTakeUntilCompletionStage<>(f, publisherActivity))
+                .doOnCancel(() -> complete(subscriberActivity))
                 .subscribe(subscriber);
         
         Flowable<? extends R> outlet = Flowable.fromPublisher(publisher)
-                .doOnComplete(() -> publisherActivity.onComplete())
-                .doOnError(e -> publisherActivity.onError(e))
-                .takeUntil(subscriberActivity)
-                .doOnCancel(() -> publisherActivity.onComplete())
+                .doOnComplete(() -> complete(publisherActivity))
+                .doOnError(e -> fail(publisherActivity, e))
+                .compose(f -> new FlowableTakeUntilCompletionStage<>(f, subscriberActivity))
+                .doOnCancel(() -> complete(publisherActivity))
                 ;
 
-        return new RxJavaProcessorBuilder<>(new FlowableProcessorBridge<>(inlet, outlet));
+        return new FlowableProcessorBridge<>(inlet, outlet);
+    }
+
+    static void complete(CompletableFuture<Object> cf) {
+        ForkJoinPool.commonPool().submit(() -> {
+            cf.complete(null);
+            return null;
+        });
+    }
+
+    static void fail(CompletableFuture<Object> cf, Throwable ex) {
+        ForkJoinPool.commonPool().submit(() -> {
+            cf.completeExceptionally(ex);
+            return null;
+        });
     }
 }

@@ -22,7 +22,7 @@ import org.reactivestreams.*;
 
 import io.reactivex.rxjava3.core.Flowable;
 
-final class FlowableProcessorBridge<T, R> implements Processor<T, R> {
+final class FlowableProcessorBridge<T, R> extends Flowable<R> implements Processor<T, R> {
 
     final Subscriber<? super T> front;
     
@@ -35,6 +35,7 @@ final class FlowableProcessorBridge<T, R> implements Processor<T, R> {
 
     @Override
     public void onSubscribe(Subscription s) {
+        Objects.requireNonNull(s, "s is null");
         front.onSubscribe(s);
     }
 
@@ -56,7 +57,7 @@ final class FlowableProcessorBridge<T, R> implements Processor<T, R> {
     }
 
     @Override
-    public void subscribe(Subscriber<? super R> s) {
+    public void subscribeActual(Subscriber<? super R> s) {
         tail.subscribe(s);
     }
 

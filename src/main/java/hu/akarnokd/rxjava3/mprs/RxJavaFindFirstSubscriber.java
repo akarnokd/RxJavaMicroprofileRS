@@ -16,7 +16,7 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -43,6 +43,7 @@ implements FlowableSubscriber<T> {
 
     @Override
     public void onNext(T t) {
+        Objects.requireNonNull(t, "t is null");
         if (SubscriptionHelper.cancel(this)) {
             completable.complete(Optional.of(t));
         }
@@ -50,7 +51,8 @@ implements FlowableSubscriber<T> {
 
     @Override
     public void onError(Throwable t) {
-        if (get() == SubscriptionHelper.CANCELLED) {
+        Objects.requireNonNull(t, "t is null");
+        if (get() != SubscriptionHelper.CANCELLED) {
             lazySet(SubscriptionHelper.CANCELLED);
             completable.completeExceptionally(t);
         } else {
@@ -60,7 +62,7 @@ implements FlowableSubscriber<T> {
 
     @Override
     public void onComplete() {
-        if (get() == SubscriptionHelper.CANCELLED) {
+        if (get() != SubscriptionHelper.CANCELLED) {
             lazySet(SubscriptionHelper.CANCELLED);
             completable.complete(Optional.empty());
         }

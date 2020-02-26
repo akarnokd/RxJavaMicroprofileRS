@@ -17,12 +17,13 @@
 package hu.akarnokd.rxjava3.mprs;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.reactivestreams.*;
 
 import io.reactivex.rxjava3.annotations.NonNull;
 import io.reactivex.rxjava3.core.FlowableSubscriber;
-import io.reactivex.rxjava3.internal.subscribers.StrictSubscriber;
+import io.reactivex.rxjava3.internal.subscriptions.SubscriptionHelper;
 
 final class RxJavaInnerNullGuard<T> implements Publisher<T> {
 
@@ -34,17 +35,15 @@ final class RxJavaInnerNullGuard<T> implements Publisher<T> {
     
     @Override
     public void subscribe(Subscriber<? super T> s) {
-        if (s instanceof StrictSubscriber) {
-            source.subscribe(new NullGuard<>(s));
-        } else {
-            source.subscribe(s);
-        }
+        source.subscribe(new NullGuard<>(s));
     }
 
-    static final class NullGuard<T> implements FlowableSubscriber<T> {
-        
+    static final class NullGuard<T> extends AtomicBoolean implements FlowableSubscriber<T> {
+
+        private static final long serialVersionUID = -5247348177689779682L;
+
         final Subscriber<? super T> downstream;
-        
+
         NullGuard(Subscriber<? super T> downstream) {
             this.downstream = downstream;
         }
@@ -68,7 +67,12 @@ final class RxJavaInnerNullGuard<T> implements Publisher<T> {
 
         @Override
         public void onSubscribe(@NonNull Subscription s) {
-            downstream.onSubscribe(s);
+            if (compareAndSet(false, true)) {
+                downstream.onSubscribe(s);
+            } else {
+                s.cancel();
+                SubscriptionHelper.reportSubscriptionSet();
+            }
         }
         
     }

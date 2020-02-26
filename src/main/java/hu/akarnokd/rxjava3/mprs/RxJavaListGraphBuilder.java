@@ -42,4 +42,24 @@ final class RxJavaListGraphBuilder implements RxJavaGraphBuilder {
         stages.add(stage);
     }
 
+    @Override
+    public String toString() {
+        StringBuilder b = new StringBuilder();
+        b.append("RxJavaListGraphBuilder(\r\n");
+        for (Stage s : stages) {
+            b.append("  ");
+            for (Class<?> itf : s.getClass().getInterfaces()) {
+                String name = itf.getSimpleName();
+                int idx = name.indexOf("Stage$");
+                if (idx >= 0) {
+                    b.append(name.substring(idx + 6)).append(" ");
+                } else {
+                    b.append(name).append("  ");
+                }
+            }
+            b.append("\r\n");
+        }
+        b.append(")");
+        return b.toString();
+    }
 }

@@ -16,10 +16,13 @@
 
 package hu.akarnokd.rxjava3.mprs;
 
+import java.util.Objects;
 import java.util.concurrent.*;
 
 import org.eclipse.microprofile.reactive.streams.operators.CompletionSubscriber;
 import org.reactivestreams.*;
+
+import io.reactivex.rxjava3.internal.subscriptions.SubscriptionHelper;
 
 class RxJavaCompletionSubscriber<T> 
 implements CompletionSubscriber<T, Void>, Subscription {
@@ -52,7 +55,7 @@ implements CompletionSubscriber<T, Void>, Subscription {
     public final void cancel() {
         Subscription s = upstream;
         if (s != null) {
-            upstream = null;
+            upstream = SubscriptionHelper.CANCELLED;
             s.cancel();
             complete.cancel(true);
         }
@@ -60,17 +63,21 @@ implements CompletionSubscriber<T, Void>, Subscription {
 
     @Override
     public final void onSubscribe(Subscription s) {
-        upstream = s;
-        subscriber.onSubscribe(this);
+        if (SubscriptionHelper.validate(upstream, s)) {
+            upstream = s;
+            subscriber.onSubscribe(this);
+        }
     }
 
     @Override
     public final void onNext(T t) {
+        Objects.requireNonNull(t, "t is null");
         subscriber.onNext(t);
     }
 
     @Override
     public final void onError(Throwable t) {
+        Objects.requireNonNull(t, "t is null");
         subscriber.onError(t);
         complete.completeExceptionally(t);
     }

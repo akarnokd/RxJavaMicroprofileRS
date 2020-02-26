@@ -47,17 +47,17 @@ extends ReactiveStreamsTck<ReactiveStreamsEngine> {
 
     @Override
     protected boolean isEnabled(Object test) {
-        return test.toString().contains("CoupledStageVerification");
-//        return true;
+//        return test.toString().contains("CoupledStageVerification");
+        return true;
     }
 
-    @BeforeSuite(alwaysRun = true)
+    @BeforeClass(alwaysRun = true)
     public void before() {
         RxJavaMicroprofilePlugins.enableBuildGraph();
         RxJavaMicroprofilePlugins.enableImmutableBuilders();
     }
 
-    @AfterSuite(alwaysRun = true)
+    @AfterClass(alwaysRun = true)
     public void after() {
         RxJavaMicroprofilePlugins.disableBuildGraph();
         RxJavaMicroprofilePlugins.disableImmutableBuilders();
