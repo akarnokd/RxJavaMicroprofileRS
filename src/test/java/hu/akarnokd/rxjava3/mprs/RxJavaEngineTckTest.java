@@ -28,6 +28,7 @@ import org.testng.annotations.*;
 /**
  * This test tries to have the engine used instead of the shortcuts.
  */
+@Test
 public class RxJavaEngineTckTest
 extends ReactiveStreamsTck<ReactiveStreamsEngine> {
 

@@ -26,6 +26,7 @@ import org.testng.annotations.*;
  * <p>
  * It auto-generates all tests related to the API.
  */
+@Test
 public class RxJavaMicroprofileTckTest
         extends ReactiveStreamsTck<RxJavaEngine> {
 
