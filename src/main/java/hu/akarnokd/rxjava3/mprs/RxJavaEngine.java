@@ -76,6 +76,12 @@ public enum RxJavaEngine implements ReactiveStreamsEngine {
         }
     }
 
+    static void requireSource(Object o, Stage stage) {
+        if (o == null) {
+            throw new IllegalArgumentException("Graph is missing a source-like stage! Found " + stage.getClass().getSimpleName());
+        }
+    }
+
     static void requireNullTerminal(Object o, Stage stage) {
         if (o != null) {
             throw new IllegalArgumentException("Graph already has a terminal stage! Found " + stage.getClass().getSimpleName());
@@ -145,99 +151,139 @@ public enum RxJavaEngine implements ReactiveStreamsEngine {
                 continue;
             }
             if (stage instanceof Stage.Coupled) {
-                if (mode == Mode.PROCESSOR) {
-                    requireNullSource(result, stage);
-                    Stage.Coupled coupled = (Stage.Coupled) stage;
+                Stage.Coupled coupled = (Stage.Coupled) stage;
+                if (result == null) {
+                    // FIXME does this make sense?
                     front = ((SubscriberWithCompletionStage)build(coupled.getSubscriber(), Mode.SUBSCRIBER)).getSubscriber();
                     result = Flowable.fromPublisher((Publisher)build(coupled.getPublisher(), Mode.PUBLISHER));
-                    continue;
+                } else {
+                    Subscriber s = ((SubscriberWithCompletionStage)build(coupled.getSubscriber(), Mode.SUBSCRIBER)).getSubscriber();
+                    Flowable f = Flowable.fromPublisher((Publisher)build(coupled.getPublisher(), Mode.PUBLISHER));
+
+                    // FIXME does this make sense?
+                    Flowable original = result;
+                    result = Flowable.defer(() -> {
+                        original.subscribe(s);
+                        return f;
+                    });
                 }
-                throw new IllegalArgumentException("Stage.Coupled is only supported when building via buildProcessor");
+                continue;
             }
             
             // ------------------------------------------------------------------------------
-            if (result == null) {
-                throw new IllegalArgumentException("Graph is missing a source-like stage! Found " + stage.getClass().getSimpleName());
-            }
+
             if (stage instanceof Stage.Map) {
+                requireSource(result, stage);
+
                 Function mapper = ((Stage.Map) stage).getMapper();
                 result = result.map(v -> mapper.apply(v));
                 continue;
             }
             if (stage instanceof Stage.Peek) {
+                requireSource(result, stage);
+
                 Consumer consumer = ((Stage.Peek) stage).getConsumer();
                 result = result.doOnNext(v -> consumer.accept(v));
                 continue;
             }
             if (stage instanceof Stage.Filter) {
+                requireSource(result, stage);
+
                 Predicate predicate = ((Stage.Filter)stage).getPredicate();
                 result = result.filter(v -> predicate.test(v));
                 continue;
             }
             if (stage instanceof Stage.DropWhile) {
+                requireSource(result, stage);
+
                 Predicate predicate = ((Stage.DropWhile)stage).getPredicate();
                 result = result.skipWhile(v -> predicate.test(v));
                 continue;
             }
             if (stage instanceof Stage.Skip) {
+                requireSource(result, stage);
+
                 long n = ((Stage.Skip)stage).getSkip();
                 result = result.skip(n);
                 continue;
             }
             if (stage instanceof Stage.Limit) {
+                requireSource(result, stage);
+
                 long n = ((Stage.Limit)stage).getLimit();
                 result = result.take(n);
                 continue;
             }
             if (stage instanceof Stage.Distinct) {
+                requireSource(result, stage);
+
                 result = result.distinct();
                 continue;
             }
             if (stage instanceof Stage.TakeWhile) {
+                requireSource(result, stage);
+
                 Predicate predicate = ((Stage.TakeWhile)stage).getPredicate();
                 result = result.takeWhile(v -> predicate.test(v));
                 continue;
             }
             if (stage instanceof Stage.FlatMap) {
+                requireSource(result, stage);
+
                 Function mapper = ((Stage.FlatMap) stage).getMapper();
                 result = result.concatMap(v -> INSTANCE.buildPublisher((Graph)mapper.apply(v)));
                 continue;
             }
             if (stage instanceof Stage.FlatMapCompletionStage) {
+                requireSource(result, stage);
+
                 Function mapper = ((Stage.FlatMapCompletionStage) stage).getMapper();
                 result = result.concatMapSingle(v -> Single.fromCompletionStage((CompletionStage)mapper.apply(v)));
                 continue;
             }
             if (stage instanceof Stage.FlatMapIterable) {
+                requireSource(result, stage);
+
                 Function mapper = ((Stage.FlatMapIterable) stage).getMapper();
                 result = result.concatMapIterable(v -> (Iterable)mapper.apply(v));
                 continue;
             }
             if (stage instanceof Stage.OnError) {
+                requireSource(result, stage);
+
                 Consumer consumer = ((Stage.OnError) stage).getConsumer();
                 result = result.doOnError(v -> consumer.accept(v));
                 continue;
             }
             if (stage instanceof Stage.OnTerminate) {
+                requireSource(result, stage);
+
                 Runnable runnable = ((Stage.OnTerminate) stage).getAction();
                 result = new FlowableDoOnTerminateAndCancel<>(result, runnable);
                 continue;
             }
             if (stage instanceof Stage.OnComplete) {
+                requireSource(result, stage);
+
                 Runnable runnable = ((Stage.OnComplete) stage).getAction();
                 result = result.doOnComplete(() -> runnable.run());
                 continue;
             }
             if (stage instanceof Stage.OnErrorResume) {
+                requireSource(result, stage);
+
                 Function mapper = ((Stage.OnErrorResume) stage).getFunction();
                 result = result.onErrorReturn(e -> mapper.apply(e));
                 continue;
             }
             if (stage instanceof Stage.OnErrorResumeWith) {
+                requireSource(result, stage);
+
                 Function mapper = ((Stage.OnErrorResumeWith) stage).getFunction();
                 result = result.onErrorResumeNext(e -> INSTANCE.buildPublisher((Graph)mapper.apply(e)));
                 continue;
             }
+            
             if (stage instanceof Stage.FindFirst) {
                 if (mode == Mode.SUBSCRIBER) {
                     requireNullTerminal(front, stage);
@@ -316,6 +362,10 @@ public enum RxJavaEngine implements ReactiveStreamsEngine {
         }
         if (front == null || completion == null) {
             throw new IllegalArgumentException("The graph had no usable stages for builing a Subscriber.");
+        }
+        front = new RxJavaInnerNullGuard.NullGuard(front);
+        if (result != null) {
+            result.subscribe(front);
         }
         return new InnerSubscriberWithCompletionStage(front, completion);
     }
