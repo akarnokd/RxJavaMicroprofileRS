@@ -19,6 +19,7 @@ package hu.akarnokd.rxjava3.mprs;
 import org.eclipse.microprofile.reactive.streams.operators.ReactiveStreamsFactory;
 import org.eclipse.microprofile.reactive.streams.operators.tck.ReactiveStreamsTck;
 import org.reactivestreams.tck.TestEnvironment;
+import org.testng.SkipException;
 import org.testng.annotations.*;
 
 /**
@@ -60,5 +61,10 @@ public class RxJavaMicroprofileTckTest
     public void after() {
         RxJavaMicroprofilePlugins.disableBuildGraph();
         RxJavaMicroprofilePlugins.disableImmutableBuilders();
+    }
+
+    @Test
+    public void announce() {
+        throw new SkipException("announce");
     }
 }

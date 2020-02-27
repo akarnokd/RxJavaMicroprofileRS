@@ -23,6 +23,7 @@ import org.eclipse.microprofile.reactive.streams.operators.spi.*;
 import org.eclipse.microprofile.reactive.streams.operators.tck.ReactiveStreamsTck;
 import org.reactivestreams.*;
 import org.reactivestreams.tck.TestEnvironment;
+import org.testng.SkipException;
 import org.testng.annotations.*;
 
 /**
@@ -52,16 +53,21 @@ extends ReactiveStreamsTck<ReactiveStreamsEngine> {
         return true;
     }
 
-    @BeforeClass(alwaysRun = true)
+    @BeforeSuite(alwaysRun = true)
     public void before() {
         RxJavaMicroprofilePlugins.enableBuildGraph();
         RxJavaMicroprofilePlugins.enableImmutableBuilders();
     }
 
-    @AfterClass(alwaysRun = true)
+    @BeforeSuite(alwaysRun = true)
     public void after() {
         RxJavaMicroprofilePlugins.disableBuildGraph();
         RxJavaMicroprofilePlugins.disableImmutableBuilders();
+    }
+
+    @Test
+    public void announce() {
+        throw new SkipException("announce");
     }
     
     enum HideEngine implements ReactiveStreamsEngine {
