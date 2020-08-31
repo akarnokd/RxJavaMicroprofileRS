@@ -435,24 +435,24 @@ public enum RxJavaEngine implements ReactiveStreamsEngine {
         
         if (mode == Mode.PUBLISHER) {
             if (result == null) {
-                throw new IllegalArgumentException("The graph had no usable stages for builing a Publisher.");
+                throw new IllegalArgumentException("The graph had no usable stages for building a Publisher.");
             }
             return result;
         }
         if (mode == Mode.PROCESSOR) {
             if (graphInlet == null || result == null) {
-                throw new IllegalArgumentException("The graph had no usable stages for builing a Processor.");
+                throw new IllegalArgumentException("The graph had no usable stages for building a Processor.");
             }
             return new FlowableProcessorBridge(graphInlet, result);
         }
         if (mode == Mode.COMPLETION) {
             if (completion == null) {
-                throw new IllegalArgumentException("The graph had no usable stages for builing a CompletionStage.");
+                throw new IllegalArgumentException("The graph had no usable stages for building a CompletionStage.");
             }
             return completion;
         }
         if (graphInlet == null || completion == null) {
-            throw new IllegalArgumentException("The graph had no usable stages for builing a Subscriber.");
+            throw new IllegalArgumentException("The graph had no usable stages for building a Subscriber.");
         }
         return new InnerSubscriberWithCompletionStage(graphInlet, completion);
     }
