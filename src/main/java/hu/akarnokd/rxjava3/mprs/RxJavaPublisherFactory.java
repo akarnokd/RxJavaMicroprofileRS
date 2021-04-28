@@ -123,13 +123,12 @@ public final class RxJavaPublisherFactory implements ReactiveStreamsFactory {
         return result;
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public <T> SubscriberBuilder<T, Void> fromSubscriber(
-            Subscriber<? extends T> subscriber) {
+            Subscriber<? super T> subscriber) {
         Objects.requireNonNull(subscriber, "processor is null");
         // FIXME the signature is wrong, at least let it compile
-        RxJavaSubscriberBuilder<T> result = new RxJavaSubscriberBuilder<>((Subscriber<T>)subscriber);
+        RxJavaSubscriberBuilder<T> result = new RxJavaSubscriberBuilder<>(subscriber);
         if (result.graph.isEnabled()) {
             result.graph.add((Stage.SubscriberStage)() -> subscriber);
         }

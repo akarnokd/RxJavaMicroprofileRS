@@ -13,10 +13,14 @@ Microprofile RS: [![Maven Central](https://maven-badges.herokuapp.com/maven-cent
 ```groovy
 
 dependencies {
-    implementation "com.github.akarnokd:rxjava3-microprofile-rs:0.0.1"
+    implementation "com.github.akarnokd:rxjava3-microprofile-rs:2.0.0"
 }
 ```
 
 
 # Features
 
+- `RxJavaPublisherFactory`
+- `RxJavaPublisherBuilder`
+- `RxJavaProcessorBuilder`
+- `RxJavaMicroprofilePlugins`
