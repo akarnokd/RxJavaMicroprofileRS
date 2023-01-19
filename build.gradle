@@ -49,7 +49,7 @@ repositories {
 
 dependencies {
     implementation "org.eclipse.microprofile.reactive-streams-operators:microprofile-reactive-streams-operators-core:3.0"
-    implementation "io.reactivex.rxjava3:rxjava:3.1.5"
+    implementation "io.reactivex.rxjava3:rxjava:3.1.6"
 
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.testng:testng:7.5'
